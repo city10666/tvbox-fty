@@ -3,16 +3,6 @@
   "wallpaper": "https://深色壁纸.xxooo.cf/",
   "sites": [
     {
-      "key": "drpy_js_优酷",
-      "name": "官源┃优酷[js]",
-      "type": 3,
-      "api": "./lib/drpy2.min.js",
-      "searchable": 1,
-      "quickSearch": 1,
-      "filterable": 0,
-      "ext": "./js/优酷.js"
-    },
-    {
       "key": "drpy_js_腾云驾雾",
       "name": "官源┃腾讯[js]",
       "type": 3,
@@ -22,6 +12,17 @@
       "filterable": 0,
       "ext": "./js/腾云驾雾.js"
     },
+    {
+      "key": "drpy_js_优酷",
+      "name": "官源┃优酷[js]",
+      "type": 3,
+      "api": "./lib/drpy2.min.js",
+      "searchable": 1,
+      "quickSearch": 1,
+      "filterable": 0,
+      "ext": "./js/优酷.js"
+    },
+
     {
       "key": "drpy_js_奇珍异兽",
       "name": "官源┃爱奇艺[js]",
