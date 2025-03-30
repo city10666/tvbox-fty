@@ -717,16 +717,6 @@
 
   "parses": [
     {
-      "name": "线路0",
-      "type": 0,
-      "url": "https://jx.nnxv.cn/tv.php?url=",
-      "ext": {
-        "header": {
-          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-      }
-    },
-    {
       "name": "线路1",
       "type": 0,
       "url": "https://video.xshyun.top/?videoUrl="
