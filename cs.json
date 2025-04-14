@@ -730,6 +730,10 @@
     {"name":"🦊8090-2","type":0,"url":"https://jx.hls.one/?url=","ext":{"header":{"User-Agent":"Mozilla/5.0"}}},
     {"name":"🦊超快解析","type":0,"url":"https://jx.jsonplayer.com/player/?url=","ext":{"header":{"User-Agent":"Mozilla/5.0"}}},
     {"name":"🦊极速解析","type":0,"url":"https://jx.m3u8.tv/jiexi/?url=","ext":{"header":{"User-Agent":"Mozilla/5.0"}}},
+    {"name":"🦊GitHub解析1","type":0,"url":"https://jx.618g.com/?url=","ext":{"header":{"User-Agent":"Mozilla/5.0"},"timeout":10}},
+    {"name":"🦊GitHub解析2","type":0,"url":"https://jx.bozrc.com:4433/player/?url=","ext":{"header":{"User-Agent":"Mozilla/5.0"},"timeout":10}},
+    {"name":"🦊GitHub解析3","type":0,"url":"https://jx.playerjy.com/?url=","ext":{"header":{"User-Agent":"Mozilla/5.0"},"timeout":10}},
+    {"name":"🦊GitHub解析4","type":0,"url":"https://jx.m3u8.tv/jiexi/?url=","ext":{"header":{"User-Agent":"Mozilla/5.0"},"timeout":10}},
 
     {"name": "云","type": 0,"url": "https://yparse.ik9.cc/index.php?url=","ext": {"flag": ["qq", "腾讯", "qiyi", "爱奇艺", "奇艺", "youku", "优酷", "mgtv", "芒果", "letv", "乐视", "pptv", "PPTV", "sohu", "bilibili", "哔哩哔哩", "哔哩"],"header":{"User-Agent":"okhttp/4.9.1"},"timeout":10}},
 
@@ -760,6 +764,12 @@
     "优酷",
     "芒果tv"
   ],
+  "apiChecker": {
+    "enable": true,
+    "checkInterval": 86400,
+    "timeout": 5,
+    "activeThreshold": 3
+  },
   "cache": {
     "enable": true,
     "size": 512,
