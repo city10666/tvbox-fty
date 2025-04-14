@@ -716,7 +716,7 @@
   "logo": "https://s1.imagehub.cc/images/2025/01/15/e8b21391c58ed454c13ade26c003e857.gif",
 
   "parses": [
-        {
+    {
       "name": "Json聚合",
       "type": 3,
       "url": "Demo"
@@ -728,15 +728,18 @@
     },
     {"name":"🦊高清4K","type":0,"url":"https://www.8090g.cn/jiexi/?url=","ext":{"header":{"User-Agent":"Mozilla/5.0"}}},
     {"name":"🦊8090-2","type":0,"url":"https://jx.hls.one/?url=","ext":{"header":{"User-Agent":"Mozilla/5.0"}}},
+    {"name":"🦊超快解析","type":0,"url":"https://jx.jsonplayer.com/player/?url=","ext":{"header":{"User-Agent":"Mozilla/5.0"}}},
+    {"name":"🦊极速解析","type":0,"url":"https://jx.m3u8.tv/jiexi/?url=","ext":{"header":{"User-Agent":"Mozilla/5.0"}}},
 
-    {"name": "云","type": 0,"url": "https://yparse.ik9.cc/index.php?url=","ext": {"flag": ["qq", "腾讯", "qiyi", "爱奇艺", "奇艺", "youku", "优酷", "mgtv", "芒果", "letv", "乐视", "pptv", "PPTV", "sohu", "bilibili", "哔哩哔哩", "哔哩"],"header":{"User-Agent":"okhttp/4.9.1"}}},
+    {"name": "云","type": 0,"url": "https://yparse.ik9.cc/index.php?url=","ext": {"flag": ["qq", "腾讯", "qiyi", "爱奇艺", "奇艺", "youku", "优酷", "mgtv", "芒果", "letv", "乐视", "pptv", "PPTV", "sohu", "bilibili", "哔哩哔哩", "哔哩"],"header":{"User-Agent":"okhttp/4.9.1"},"timeout":10}},
 
-    {"name":"接口1","type":0,"url":"https://player.maqq.cn/?url=","ext":{"header":{"User-Agent":"Mozilla/5.0"}}},
+    {"name":"接口1","type":0,"url":"https://player.maqq.cn/?url=","ext":{"header":{"User-Agent":"Mozilla/5.0"},"timeout":10}},
 
-    {"name":"接口2","type":0,"url":"https://jx.xmflv.com/?url=","ext":{"header":{"User-Agent":"Mozilla/5.0"}}},
-    {"name":"接口3","type":0,"url":"https://www.pangujiexi.com/pangu/?url=","ext":{"flag":["qq","qiyi","mgtv","youku","letv","sohu","xigua","1905","优播线路","腾播线路"],"header":{"User-Agent":"Dart/2.14 (dart:io)"}}},
-    {"name":"接口4","type":0,"url":"https://jx.m3u8.tv/jiexi/?url=","ext":{"header":{"User-Agent":"Mozilla/5.0"}}},
-    {"name":"m3u8","type":0,"url":"https://jx.m3u8.tv/jiexi/?url="}
+    {"name":"接口2","type":0,"url":"https://jx.xmflv.com/?url=","ext":{"header":{"User-Agent":"Mozilla/5.0"},"timeout":10}},
+    {"name":"接口3","type":0,"url":"https://www.pangujiexi.com/pangu/?url=","ext":{"flag":["qq","qiyi","mgtv","youku","letv","sohu","xigua","1905","优播线路","腾播线路"],"header":{"User-Agent":"Dart/2.14 (dart:io)"},"timeout":10}},
+    {"name":"接口4","type":0,"url":"https://jx.m3u8.tv/jiexi/?url=","ext":{"header":{"User-Agent":"Mozilla/5.0"},"timeout":10}},
+    {"name":"m3u8","type":0,"url":"https://jx.m3u8.tv/jiexi/?url="},
+    {"name":"备用解析","type":0,"url":"https://jx.bozrc.com:4433/player/?url=","ext":{"header":{"User-Agent":"Mozilla/5.0"},"timeout":10}}
 
   ],
   "flags": [
@@ -757,6 +760,16 @@
     "优酷",
     "芒果tv"
   ],
+  "cache": {
+    "enable": true,
+    "size": 512,
+    "expire": 3600
+  },
+  "threadPool": {
+    "coreSize": 4,
+    "maxSize": 8,
+    "queueSize": 100
+  },
   "ijk": [
     {
       "group": "软解码",
@@ -765,6 +778,11 @@
           "category": 4,
           "name": "opensles",
           "value": "0"
+        },
+        {
+          "category": 4,
+          "name": "buffer-size",
+          "value": "8192"
         },
         {
           "category": 4,
@@ -809,7 +827,7 @@
         {
           "category": 4,
           "name": "max-buffer-size",
-          "value": "5242880"
+          "value": "8388608"
         },
         {
           "category": 4,
@@ -889,7 +907,7 @@
         {
           "category": 4,
           "name": "max-buffer-size",
-          "value": "5242880"
+          "value": "8388608"
         },
         {
           "category": 4,
