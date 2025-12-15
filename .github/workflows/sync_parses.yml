@@ -26,32 +26,23 @@ jobs:
 
       - name: Merge parses (ultimate stable)
         run: |
-          jq \
-          --slurpfile up upstream.json \
-          '
-          .parses =
-          (
-            [
-              {"name":"解析聚合","type":3,"url":"Demo"},
-              {"name":"Json并发","type":2,"url":"Parallel"},
-              {"name":"Json轮询","type":2,"url":"Sequence"}
-            ]
-            +
-            (
-              $up[0].parses
-              | map(select(.name? | test("Json聚合"; "i") | not))
-              | map(select(.url? and .type?))
-              | unique_by(.url)
-            )
-          )
-          ' aiyouteng.json > aiyouteng.new.json
-
-          mv aiyouteng.new.json aiyouteng.json
-
-      - name: Commit and push if changed
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add aiyouteng.json
-          git diff --cached --quiet || git commit -m "auto: sync parses only"
-          git push
+jq \
+--slurpfile up upstream.json \
+'
+.parses =
+(
+  $up[0].parses
+  | map(
+      if .name == "Json聚合" and .type == 3 and .url == "Demo" then
+        [
+          {"name":"解析聚合","type":3,"url":"Demo"},
+          {"name":"Json并发","type":2,"url":"Parallel"},
+          {"name":"Json轮询","type":2,"url":"Sequence"}
+        ]
+      else
+        .
+      end
+    )
+  | flatten
+)
+' aiyouteng.json > aiyouteng.new.json
