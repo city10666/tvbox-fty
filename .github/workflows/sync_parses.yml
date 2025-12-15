@@ -1,4 +1,4 @@
-name: Sync Parses and Spider
+name: Sync Parses and Spider Safely
 
 permissions:
   contents: write
@@ -24,7 +24,7 @@ jobs:
           curl -L -o upstream.json \
           https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json
 
-      - name: Merge parses and update spider
+      - name: Merge parses and update spider safely
         run: |
           jq --slurpfile up upstream.json '
             # 更新 parses
@@ -39,6 +39,6 @@ jobs:
                 .
               end
             ) | flatten)
-            # 更新 spider 为上游 raw URL + MD5
-            | .spider = "https://raw.githubusercontent.com/qist/tvbox/master/jar/fan.txt;md5;3962e9dbce2c7b61a53b1b796f098d47"
+            # 安全更新 spider，如果不存在或不是上游 URL，则替换
+            | .spider = (if (.spider | test("^https://raw\\.githubusercontent\\.com/qist/tvbox/master/jar/fan.txt")) then .spider else "https://raw.githubusercontent.com/qist/tvbox/master/jar/fan.txt;md5;3962e9dbce2c7b61a53b1b796f098d47" end)
           ' aiyouteng.json > aiyouteng.new.json
