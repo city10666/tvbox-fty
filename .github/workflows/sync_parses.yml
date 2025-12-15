@@ -1,0 +1,40 @@
+name: Sync Parses Only
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"   # 每 6 小时
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      - name: Fetch upstream dianshi.json
+        run: |
+          curl -L -o upstream.json \
+          https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json
+
+      - name: Merge parses into aiyouteng.json
+        run: |
+          jq \
+          --slurpfile up upstream.json \
+          '
+          .parses = $up[0].parses
+          ' aiyouteng.json > aiyouteng.new.json
+
+          mv aiyouteng.new.json aiyouteng.json
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add aiyouteng.json
+          git diff --cached --quiet || git commit -m "auto: sync parses only"
+          git push
