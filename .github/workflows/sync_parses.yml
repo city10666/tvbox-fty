@@ -17,7 +17,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install jq
-        run: sudo apt-get install -y jq
+        run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Fetch upstream dianshi.json
         run: |
@@ -26,23 +26,16 @@ jobs:
 
       - name: Merge parses (ultimate stable)
         run: |
-          jq \
---slurpfile up upstream.json \
-'
-.parses =
-(
-  $up[0].parses
-  | map(
-      if .name == "Json聚合" and .type == 3 and .url == "Demo" then
-        [
-          {"name":"解析聚合","type":3,"url":"Demo"},
-          {"name":"Json并发","type":2,"url":"Parallel"},
-          {"name":"Json轮询","type":2,"url":"Sequence"}
-        ]
-      else
-        .
-      end
-    )
-  | flatten
-)
-' aiyouteng.json > aiyouteng.new.json
+          jq --slurpfile up upstream.json '
+            .parses = ($up[0].parses | map(
+              if .name == "Json聚合" and .type == 3 and .url == "Demo" then
+                [
+                  {"name":"解析聚合","type":3,"url":"Demo"},
+                  {"name":"Json并发","type":2,"url":"Parallel"},
+                  {"name":"Json轮询","type":2,"url":"Sequence"}
+                ]
+              else
+                .
+              end
+            ) | flatten)
+          ' aiyouteng.json > aiyouteng.new.json
