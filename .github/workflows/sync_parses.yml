@@ -1,7 +1,7 @@
-名字: Sync Parses Only
+name: Sync Parses Only
 
 permissions:
-  contents: 撰写
+  contents: write
 
 on:
   schedule:
@@ -13,18 +13,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - 名字: Checkout repo
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - 名字: Install jq
+      - name: Install jq
         run: sudo apt-get install -y jq
 
-      - 名字: Fetch upstream dianshi.json
+      - name: Fetch upstream dianshi.json
         run: |
           curl -L -o upstream.json \
           https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json
 
-      - 名字: Merge parses (ultimate stable)
+      - name: Merge parses (ultimate stable)
         run: |
           jq \
           --slurpfile up upstream.json \
@@ -48,7 +48,7 @@ jobs:
 
           mv aiyouteng.new.json aiyouteng.json
 
-      - 名字: Commit and push if changed
+      - name: Commit and push if changed
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
