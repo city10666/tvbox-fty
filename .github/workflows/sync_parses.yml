@@ -1,40 +1,27 @@
-name: Sync Parses Only
+jq \
+--slurpfile up upstream.json \
+'
+.parses =
+(
+  # === 1. 你固定的三条解析（永远在最前） ===
+  [
+    {"name":"解析聚合","type":3,"url":"Demo"},
+    {"name":"Json并发","type":2,"url":"Parallel"},
+    {"name":"Json轮询","type":2,"url":"Sequence"}
+  ]
+  +
+  (
+    # === 2. 上游 parses 处理流水线 ===
+    $up[0].parses
 
-on:
-  schedule:
-    - cron: "0 */6 * * *"   # 每 6 小时
-  workflow_dispatch:
+    # 2.1 删除上游自带的 Json聚合（不区分大小写）
+    | map(select(.name? | test("Json聚合"; "i") | not))
 
-jobs:
-  sync:
-    runs-on: ubuntu-latest
+    # 2.2 删除没有 url / type 的异常项
+    | map(select(.url? and .type?))
 
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Install jq
-        run: sudo apt-get install -y jq
-
-      - name: Fetch upstream dianshi.json
-        run: |
-          curl -L -o upstream.json \
-          https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json
-
-      - name: Merge parses into aiyouteng.json
-        run: |
-          jq \
-          --slurpfile up upstream.json \
-          '
-          .parses = $up[0].parses
-          ' aiyouteng.json > aiyouteng.new.json
-
-          mv aiyouteng.new.json aiyouteng.json
-
-      - name: Commit and push if changed
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add aiyouteng.json
-          git diff --cached --quiet || git commit -m "auto: sync parses only"
-          git push
+    # 2.3 按 url 去重（同一个解析只留一个）
+    | unique_by(.url)
+  )
+)
+' aiyouteng.json > aiyouteng.new.json
