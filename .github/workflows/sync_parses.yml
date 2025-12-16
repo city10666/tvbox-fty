@@ -1,4 +1,4 @@
-name: Sync Parses and Spider Safely
+name: Sync Parses + Spider + Health Check
 
 permissions:
   contents: write
@@ -16,29 +16,67 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq curl
 
       - name: Fetch upstream dianshi.json
         run: |
           curl -L -o upstream.json \
           https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json
 
-      - name: Merge parses and update spider safely
+      - name: Build parses + spider (with health check)
         run: |
+          # 1. 先生成 parses（不检测）
           jq --slurpfile up upstream.json '
-            # 更新 parses
-            .parses = ($up[0].parses | map(
-              if .name == "Json聚合" and .type == 3 and .url == "Demo" then
-                [
-                  {"name":"解析聚合","type":3,"url":"Demo"},
-                  {"name":"Json并发","type":2,"url":"Parallel"},
-                  {"name":"Json轮询","type":2,"url":"Sequence"}
-                ]
-              else
-                .
-              end
-            ) | flatten)
-            # 安全更新 spider，如果不存在或不是上游 URL，则替换
-            | .spider = (if (.spider | test("^https://raw\\.githubusercontent\\.com/qist/tvbox/master/jar/fan.txt")) then .spider else "https://raw.githubusercontent.com/qist/tvbox/master/jar/fan.txt;md5;3962e9dbce2c7b61a53b1b796f098d47" end)
-          ' aiyouteng.json > aiyouteng.new.json
+            .parses = (
+              $up[0].parses
+              | map(
+                  if .name == "Json聚合" and .type == 3 and .url == "Demo" then
+                    [
+                      {"name":"解析聚合","type":3,"url":"Demo"},
+                      {"name":"Json并发","type":2,"url":"Parallel"},
+                      {"name":"Json轮询","type":2,"url":"Sequence"}
+                    ]
+                  else
+                    .
+                  end
+                )
+              | flatten
+            )
+            | .spider = "https://raw.githubusercontent.com/qist/tvbox/master/jar/fan.txt;md5;3962e9dbce2c7b61a53b1b796f098d47"
+          ' aiyouteng.json > aiyouteng.tmp.json
+
+          # 2. 解析站连通性检测
+          jq -c '.parses[]' aiyouteng.tmp.json | while read -r item; do
+            url=$(echo "$item" | jq -r '.url')
+
+            # Demo / Parallel / Sequence 属于内置逻辑，不检测
+            if [[ "$url" == "Demo" || "$url" == "Parallel" || "$url" == "Sequence" ]]; then
+              echo "$item"
+              continue
+            fi
+
+            # 真实 URL 做 HEAD 检测（3 秒超时）
+            if curl -I --connect-timeout 3 --max-time 5 -s "$url" | head -n 1 | grep -qE "200|301|302"; then
+              echo "$item"
+            else
+              echo "❌ 剔除不可用解析：$url"
+            fi
+          done | jq -s '.' > parses.ok.json
+
+          # 3. 写回最终文件（直接覆盖）
+          jq --slurpfile parses parses.ok.json '
+            .parses = $parses[0]
+          ' aiyouteng.tmp.json > aiyouteng.json
+
+          rm -f aiyouteng.tmp.json parses.ok.json
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add aiyouteng.json
+          git diff --cached --quiet || git commit -m "sync parses + spider (health check)"
+          git push
