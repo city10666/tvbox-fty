@@ -28,7 +28,6 @@ jobs:
 
       - name: Build parses + spider (with health check)
         run: |
-          # 1. 先生成 parses（不检测）
           jq --slurpfile up upstream.json '
             .parses = (
               $up[0].parses
@@ -48,25 +47,21 @@ jobs:
             | .spider = "https://raw.githubusercontent.com/qist/tvbox/master/jar/fan.txt;md5;3962e9dbce2c7b61a53b1b796f098d47"
           ' aiyouteng.json > aiyouteng.tmp.json
 
-          # 2. 解析站连通性检测
           jq -c '.parses[]' aiyouteng.tmp.json | while read -r item; do
             url=$(echo "$item" | jq -r '.url')
 
-            # Demo / Parallel / Sequence 属于内置逻辑，不检测
             if [[ "$url" == "Demo" || "$url" == "Parallel" || "$url" == "Sequence" ]]; then
               echo "$item"
               continue
             fi
 
-            # 真实 URL 做 HEAD 检测（3 秒超时）
             if curl -I --connect-timeout 3 --max-time 5 -s "$url" | head -n 1 | grep -qE "200|301|302"; then
               echo "$item"
             else
-              echo "❌ 剔除不可用解析：$url"
+              echo "❌ 剔除不可用解析：$url" >&2
             fi
           done | jq -s '.' > parses.ok.json
 
-          # 3. 写回最终文件（直接覆盖）
           jq --slurpfile parses parses.ok.json '
             .parses = $parses[0]
           ' aiyouteng.tmp.json > aiyouteng.json
