@@ -1,4 +1,4 @@
-name: Sync Parses + Spider + Health Check
+name: Sync TVBox Parses (Safe)
 
 permissions:
   contents: write
@@ -26,8 +26,9 @@ jobs:
           curl -L -o upstream.json \
           https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json
 
-      - name: Build parses + spider (with health check)
+      - name: Sync parses + spider (cert-safe check)
         run: |
+          # 1. 合并 parses + spider
           jq --slurpfile up upstream.json '
             .parses = (
               $up[0].parses
@@ -47,6 +48,7 @@ jobs:
             | .spider = "https://raw.githubusercontent.com/qist/tvbox/master/jar/fan.txt;md5;3962e9dbce2c7b61a53b1b796f098d47"
           ' aiyouteng.json > aiyouteng.tmp.json
 
+          # 2. 解析站可用性检测（GET + 忽略证书）
           jq -c '.parses[]' aiyouteng.tmp.json | while read -r item; do
             url=$(echo "$item" | jq -r '.url')
 
@@ -55,13 +57,19 @@ jobs:
               continue
             fi
 
-            if curl -I --connect-timeout 3 --max-time 5 -s "$url" | head -n 1 | grep -qE "200|301|302"; then
+            if curl -k -L \
+                -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
+                --range 0-0 \
+                --connect-timeout 4 \
+                --max-time 6 \
+                -s "$url" >/dev/null; then
               echo "$item"
             else
               echo "❌ 剔除不可用解析：$url" >&2
             fi
           done | jq -s '.' > parses.ok.json
 
+          # 3. 写回并覆盖
           jq --slurpfile parses parses.ok.json '
             .parses = $parses[0]
           ' aiyouteng.tmp.json > aiyouteng.json
@@ -73,5 +81,5 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add aiyouteng.json
-          git diff --cached --quiet || git commit -m "sync parses + spider (health check)"
+          git diff --cached --quiet || git commit -m "sync parses (safe check)"
           git push
