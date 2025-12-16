@@ -2039,6 +2039,16 @@
       "url": "https://ylu.cc/index.php?url="
     },
     {
+      "name": "无尽",
+      "type": 0,
+      "url": "https://jx.wujinkk.com/dplayer/?url=",
+      "ext": {
+        "header": {
+          "User-Agent": "Mozilla/5.0"
+        }
+      }
+    },
+    {
       "name": "yemu",
       "type": 0,
       "url": "https://www.yemu.xyz/?url="
