@@ -2034,11 +2034,6 @@
       "url": "https://jx.m3u8.tv/jx/jx.php?url="
     },
     {
-      "name": "羽路均沾",
-      "type": 0,
-      "url": "https://ylu.cc/index.php?url="
-    },
-    {
       "name": "无尽",
       "type": 0,
       "url": "https://jx.wujinkk.com/dplayer/?url=",
@@ -2047,6 +2042,11 @@
           "User-Agent": "Mozilla/5.0"
         }
       }
+    },
+    {
+      "name": "yemu",
+      "type": 0,
+      "url": "https://www.yemu.xyz/?url="
     },
     {
       "name": "解析1",
@@ -2297,6 +2297,16 @@
       "name": "盘古",
       "type": 0,
       "url": "https://www.playm3u8.cn/jiexi.php?url=",
+      "ext": {
+        "header": {
+          "user-agent": "Mozilla/5.0(Linux;Android13;V2049ABuild/TP1A.220624.014;wv)AppleWebKit/537.36(KHTML,likeGecko)Version/4.0Chrome/116.0.0.0MobileSafari/537.36"
+        }
+      }
+    },
+    {
+      "name": "夜幕",
+      "type": 0,
+      "url": "https://yemu.xyz/?url=",
       "ext": {
         "header": {
           "user-agent": "Mozilla/5.0(Linux;Android13;V2049ABuild/TP1A.220624.014;wv)AppleWebKit/537.36(KHTML,likeGecko)Version/4.0Chrome/116.0.0.0MobileSafari/537.36"
