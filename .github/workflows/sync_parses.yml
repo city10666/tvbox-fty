@@ -41,7 +41,7 @@ jobs:
               .parses = (
                 .parses
                 | map(
-                    if .name == "Json聚合" and .type == 3 and .url == "Demo" then
+                    if .name=="Json聚合" and .type==3 and .url=="Demo" then
                       [
                         {"name":"并发·主力","type":2,"url":"Parallel"},
                         {"name":"轮询·兜底","type":2,"url":"Sequence"},
@@ -56,35 +56,74 @@ jobs:
             end' upstream.json > base.json
 
       # ===============================
-      # 2. Platform split + cooldown + success memory
+      # 2. Learning + cooldown
+      # ===============================
+      - name: Learn parses with cooldown
+        run: |
+          jq -c '.parses[]' base.json | while read -r item; do
+            url=$(echo "$item" | jq -r '.url')
+            [[ "$url" =~ Parallel|Sequence|Demo ]] && continue
+
+            key=$(echo -n "$url" | md5sum | cut -d' ' -f1)
+            state=$(jq -r ".\"$key\".cooldown // 0" parses_stats.json)
+            fail=$(jq -r ".\"$key\".fail // 0" parses_stats.json)
+
+            # 冷却中跳过
+            if [[ $state -gt 0 ]]; then
+              jq ".\"$key\".cooldown = ($state - 1)" parses_stats.json > tmp && mv tmp parses_stats.json
+              continue
+            fi
+
+            # 测试访问
+            if curl -k -L -A "Mozilla/5.0" --range 0-0 --connect-timeout 4 --max-time 6 -s "$url" >/dev/null; then
+              hit=1
+            else
+              hit=0
+            fi
+
+            # 更新失败次数
+            if [[ $hit -eq 0 ]]; then
+              fail=$((fail+1))
+            else
+              fail=0
+            fi
+
+            cooldown=0
+            [[ $fail -ge 3 ]] && cooldown=3
+
+            jq ".\"$key\".fail = $fail | .\"$key\".cooldown = $cooldown" parses_stats.json > tmp && mv tmp parses_stats.json
+          done
+
+      # ===============================
+      # 3. Generate platform JSONs
       # ===============================
       - name: Generate platform JSONs
         run: |
           for p in iqiyi qq youku mgtv other; do
-            jq --arg p "$p" '
-              .parses |= (
-                [
-                  {"name":"并发·主力","type":2,"url":"Parallel"},
-                  {"name":"轮询·兜底","type":2,"url":"Sequence"},
-                  {"name":"聚合·保底","type":3,"url":"Demo"}
-                ]
-                +
-                (
-                  .parses
-                  | map(select(
-                      .url!="Parallel" and .url!="Sequence" and .url!="Demo"
-                    ))
-                  | map(
-                      if $p=="iqiyi" then select(.url|test("iqiyi"))
-                      elif $p=="qq" then select(.url|test("qq|weiyun"))
-                      elif $p=="youku" then select(.url|test("youku"))
-                      elif $p=="mgtv" then select(.url|test("mgtv"))
-                      else .
-                      end
-                    )
+            cat base.json | jq --arg p "$p" '
+              . as $base |
+              $base
+              | .parses = (
+                  [
+                    {"name":"并发·主力","type":2,"url":"Parallel"},
+                    {"name":"轮询·兜底","type":2,"url":"Sequence"},
+                    {"name":"聚合·保底","type":3,"url":"Demo"}
+                  ]
+                  +
+                  (
+                    $base.parses
+                    | map(select(.url!="Parallel" and .url!="Sequence" and .url!="Demo"))
+                    | map(
+                        if $p=="iqiyi" then select(.url|test("iqiyi"))
+                        elif $p=="qq" then select(.url|test("qq|weiyun"))
+                        elif $p=="youku" then select(.url|test("youku"))
+                        elif $p=="mgtv" then select(.url|test("mgtv"))
+                        else .
+                        end
+                      )
+                  )
                 )
-              )
-            ' base.json > platform/$p.new.json
+            ' > platform/$p.new.json
 
             count=$(jq '.parses | length' platform/$p.new.json)
             if [[ $count -ge 5 ]]; then
@@ -96,19 +135,19 @@ jobs:
           done
 
       # ===============================
-      # 3. Build main aiyouteng.json
+      # 4. Build main JSON
       # ===============================
-      - name: Build main JSON
+      - name: Build main aiyouteng.json
         run: |
           cp base.json aiyouteng.json
 
       # ===============================
-      # 4. Commit
+      # 5. Commit changes
       # ===============================
       - name: Commit changes
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git add aiyouteng.json platform/*.json parses_stats.json
+          git add aiyouteng.json platform/*.json parses_stats.json aiyouteng.last.json
           git diff --cached --quiet || git commit -m "V5 Final platform split JSON"
           git push
