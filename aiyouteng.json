@@ -1882,7 +1882,6 @@
     {"name":"解析聚合","type":3,"url":"Demo"},
     {"name":"Json并发","type":2,"url":"Parallel"},
     {"name":"Json轮询","type":2,"url":"Sequence"},
-    {"name":"Web聚合","type":3,"url":"Web"},
     {
       "name": "jx",
       "type": 0,
