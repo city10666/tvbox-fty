@@ -1,4 +1,4 @@
-name: TVBox 严格格式同步
+name: TVBox 精确同步
 
 on:
   schedule:
@@ -26,94 +26,79 @@ jobs:
     - name: 下载源文件
       run: |
         curl -s -o source.json "https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json"
-        cp dianshi.json local.json || echo "无本地文件"
 
-    - name: 严格处理 JSON
+    - name: 安全处理 JSON
       run: |
-        cat > process_json.js << 'EOF'
-        const fs = require('fs');
-        const path = require('path');
+        cat > process_json.py << 'EOF'
+        import json
+        import os
         
-        // 读取源文件
-        const source = JSON.parse(fs.readFileSync('source.json', 'utf8'));
+        # 读取源文件
+        with open('source.json', 'r', encoding='utf-8') as f:
+            source = json.load(f)
         
-        // 定义必须优先的 sites 键值
-        const priorityKeys = [
-          "drpy_js_360影视",
-          "drpy_js_百忙无果",
-          "drpy_js_腾云驾雾",
-          "drpy_js_奇珍异兽",
-          "drpy_js_菜狗",
-          "drpy_js_优酷"
-        ];
-
-        // 1. 处理 sites 数组
-        const newSites = [];
+        # 定义必须优先的 sites 键值
+        priority_keys = [
+            "drpy_js_360影视",
+            "drpy_js_百忙无果", 
+            "drpy_js_腾云驾雾",
+            "drpy_js_奇珍异兽",
+            "drpy_js_菜狗",
+            "drpy_js_优酷"
+        ]
         
-        // 1.1 先添加优先级 sites
-        priorityKeys.forEach(key => {
-          const item = source.sites.find(x => x.key === key);
-          if (item) newSites.push(processItem(item));
-        });
-
-        // 1.2 添加其他 sites
-        source.sites.forEach(item => {
-          if (!priorityKeys.includes(item.key)) {
-            newSites.push(processItem(item));
-          }
-        });
-
-        // 2. 处理单个项目
-        function processItem(item) {
-          // 创建副本避免修改原对象
-          const newItem = JSON.parse(JSON.stringify(item));
-          
-          // 处理 api 路径
-          if (newItem.api && newItem.api.startsWith('./')) {
-            newItem.api = convertPath(newItem.api);
-          }
-          
-          // 处理 ext 路径
-          if (newItem.ext && newItem.ext.startsWith('./')) {
-            newItem.ext = convertPath(newItem.ext);
-          }
-          
-          return newItem;
-        }
-
-        // 3. 精确路径转换
-        function convertPath(originalPath) {
-          const baseUrl = 'https://github.com/qist/tvbox/blob/master';
-          const relativePath = originalPath.replace('./', '');
-          
-          // 特殊处理 lib/ 和 js/ 目录
-          if (originalPath.startsWith('./lib/')) {
-            return `${baseUrl}/lib/${path.basename(relativePath)}`;
-          }
-          if (originalPath.startsWith('./js/')) {
-            return `${baseUrl}/js/${path.basename(relativePath)}`;
-          }
-          
-          // 默认处理
-          return `${baseUrl}/${relativePath}`;
-        }
-
-        // 4. 构建最终结果（完全保持源结构）
-        const result = {
-          ...source,
-          sites: newSites
-        };
-
-        // 保持 TVBox 标准格式（2空格缩进）
-        fs.writeFileSync('dianshi.json', JSON.stringify(result, null, 2));
+        def convert_path(path_value):
+            """安全地转换路径"""
+            if not isinstance(path_value, str):
+                return path_value
+            
+            if path_value.startswith('./lib/'):
+                return f'https://github.com/qist/tvbox/blob/master/lib/{os.path.basename(path_value)}'
+            elif path_value.startswith('./js/'):
+                return f'https://github.com/qist/tvbox/blob/master/js/{os.path.basename(path_value)}'
+            elif path_value.startswith('./'):
+                return f'https://github.com/qist/tvbox/blob/master/{path_value[2:]}'
+            return path_value
+        
+        # 处理 sites
+        priority_sites = []
+        other_sites = []
+        
+        for site in source.get('sites', []):
+            if site.get('key') in priority_keys:
+                # 处理优先级 sites
+                processed = site.copy()
+                if 'api' in processed:
+                    processed['api'] = convert_path(processed['api'])
+                if 'ext' in processed and isinstance(processed['ext'], str):
+                    processed['ext'] = convert_path(processed['ext'])
+                priority_sites.append(processed)
+            else:
+                # 其他 sites
+                processed = site.copy()
+                if 'api' in processed:
+                    processed['api'] = convert_path(processed['api'])
+                if 'ext' in processed and isinstance(processed['ext'], str):
+                    processed['ext'] = convert_path(processed['ext'])
+                other_sites.append(processed)
+        
+        # 组合结果
+        result = source.copy()
+        result['sites'] = priority_sites + other_sites
+        
+        # 写入文件
+        with open('dianshi.json', 'w', encoding='utf-8') as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        
+        print("✅ JSON 处理完成")
         EOF
         
-        node process_json.js
+        python3 process_json.py
 
     - name: 提交更改
       run: |
         git add dianshi.json
         if ! git diff --staged --quiet; then
-          git commit -m "🔄 TVBox 严格格式同步 - $(date +'%Y-%m-%d')"
+          git commit -m "🔄 同步 dianshi.json - $(date +'%Y-%m-%d %H:%M')"
           git push
         fi
