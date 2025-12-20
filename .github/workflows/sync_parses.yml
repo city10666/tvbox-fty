@@ -32,9 +32,6 @@ jobs:
           [ -f parses_stats.json ] || echo '{}' > parses_stats.json
           [ -f aiyouteng.last.json ] || echo '{}' > aiyouteng.last.json
 
-      # ===============================
-      # 1. Normalize base (array/object safe)
-      # ===============================
       - name: Normalize base
         run: |
           jq 'if type=="array" then {parses: ., spider:"https://raw.githubusercontent.com/qist/tvbox/master/jar/fan.txt;md5;3962e9dbce2c7b61a53b1b796f098d47"} else
@@ -55,48 +52,33 @@ jobs:
               | .spider = "https://raw.githubusercontent.com/qist/tvbox/master/jar/fan.txt;md5;3962e9dbce2c7b61a53b1b796f098d47"
             end' upstream.json > base.json
 
-      # ===============================
-      # 2. Learning + cooldown
-      # ===============================
       - name: Learn parses with cooldown
         run: |
           jq -c '.parses[]' base.json | while read -r item; do
             url=$(echo "$item" | jq -r '.url')
             [[ "$url" =~ Parallel|Sequence|Demo ]] && continue
-
             key=$(echo -n "$url" | md5sum | cut -d' ' -f1)
             state=$(jq -r ".\"$key\".cooldown // 0" parses_stats.json)
             fail=$(jq -r ".\"$key\".fail // 0" parses_stats.json)
-
-            # 冷却中跳过
             if [[ $state -gt 0 ]]; then
               jq ".\"$key\".cooldown = ($state - 1)" parses_stats.json > tmp && mv tmp parses_stats.json
               continue
             fi
-
-            # 测试访问
             if curl -k -L -A "Mozilla/5.0" --range 0-0 --connect-timeout 4 --max-time 6 -s "$url" >/dev/null; then
               hit=1
             else
               hit=0
             fi
-
-            # 更新失败次数
             if [[ $hit -eq 0 ]]; then
               fail=$((fail+1))
             else
               fail=0
             fi
-
             cooldown=0
             [[ $fail -ge 3 ]] && cooldown=3
-
             jq ".\"$key\".fail = $fail | .\"$key\".cooldown = $cooldown" parses_stats.json > tmp && mv tmp parses_stats.json
           done
 
-      # ===============================
-      # 3. Generate platform JSONs
-      # ===============================
       - name: Generate platform JSONs
         run: |
           for p in iqiyi qq youku mgtv other; do
@@ -134,16 +116,10 @@ jobs:
             fi
           done
 
-      # ===============================
-      # 4. Build main JSON
-      # ===============================
       - name: Build main aiyouteng.json
         run: |
           cp base.json aiyouteng.json
 
-      # ===============================
-      # 5. Commit changes
-      # ===============================
       - name: Commit changes
         run: |
           git config user.name "github-actions"
