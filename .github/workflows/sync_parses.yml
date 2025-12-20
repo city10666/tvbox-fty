@@ -1,4 +1,4 @@
-name: TVBox Parses Evolution (Stable)
+name: TVBox Parses Evolution V3 (Platform Aware)
 
 permissions:
   contents: write
@@ -26,11 +26,11 @@ jobs:
           curl -L -o upstream.json \
           https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json
 
-      - name: Init stats (safe)
+      - name: Init stats (platform aware)
         run: |
           [ -f parses_stats.json ] || echo '{}' > parses_stats.json
 
-      - name: Normalize upstream → base.json
+      - name: Normalize parses + spider (NO STRUCT LOSS)
         run: |
           jq '
             .parses = (
@@ -38,9 +38,9 @@ jobs:
               | map(
                   if .name == "Json聚合" and .type == 3 and .url == "Demo" then
                     [
-                      {"name":"解析聚合","type":3,"url":"Demo"},
-                      {"name":"Json并发","type":2,"url":"Parallel"},
-                      {"name":"Json轮询","type":2,"url":"Sequence"}
+                      {"name":"并发·主力","type":2,"url":"Parallel"},
+                      {"name":"轮询·兜底","type":2,"url":"Sequence"},
+                      {"name":"聚合·保底","type":3,"url":"Demo"}
                     ]
                   else
                     .
@@ -51,24 +51,26 @@ jobs:
             | .spider = "https://raw.githubusercontent.com/qist/tvbox/master/jar/fan.txt;md5;3962e9dbce2c7b61a53b1b796f098d47"
           ' upstream.json > base.json
 
-      - name: Auto group + learning
+      - name: Platform learning + auto sort
         run: |
           MAX_PARALLEL=6
-          FAST=()
-          SLOW=()
 
           jq -c '.parses[]' base.json | while read -r item; do
             url=$(echo "$item" | jq -r '.url')
 
-            if [[ "$url" == "Demo" || "$url" == "Parallel" || "$url" == "Sequence" ]]; then
-              continue
-            fi
+            [[ "$url" == "Parallel" || "$url" == "Sequence" || "$url" == "Demo" ]] && continue
 
             key=$(echo -n "$url" | md5sum | cut -d' ' -f1)
-            ok=$(jq -r ".\"$key\".ok // 0" parses_stats.json)
-            total=$(jq -r ".\"$key\".total // 0" parses_stats.json)
 
-            start=$(date +%s%3N)
+            platform="other"
+            [[ "$url" =~ iqiyi ]] && platform="iqiyi"
+            [[ "$url" =~ qq ]] && platform="qq"
+            [[ "$url" =~ youku ]] && platform="youku"
+            [[ "$url" =~ mgtv ]] && platform="mgtv"
+
+            ok=$(jq -r ".\"$key\".$platform.ok // 0" parses_stats.json)
+            total=$(jq -r ".\"$key\".$platform.total // 0" parses_stats.json)
+
             if curl -k -L -A "Mozilla/5.0" \
                 --range 0-0 \
                 --connect-timeout 4 \
@@ -78,44 +80,28 @@ jobs:
             else
               hit=0
             fi
-            end=$(date +%s%3N)
-            cost=$((end - start))
 
-            jq ".\"$key\" = {ok: ($ok + $hit), total: ($total + 1)}" \
+            jq ".\"$key\".$platform.ok = ($ok + $hit)
+                | .\"$key\".$platform.total = ($total + 1)" \
               parses_stats.json > tmp && mv tmp parses_stats.json
-
-            score=$(( (ok * 100 / (total + 1)) - cost ))
-
-            if [[ $hit -eq 1 && $cost -le 3000 ]]; then
-              FAST+=("$item")
-            else
-              SLOW+=("$item")
-            fi
           done
 
-          printf '%s\n' "${FAST[@]}" | head -n $MAX_PARALLEL > fast.txt
-          printf '%s\n' "${FAST[@]:$MAX_PARALLEL}" "${SLOW[@]}" > slow.txt
-
-          jq -s '.' fast.txt > parallel.json
-          jq -s '.' slow.txt > sequence.json
-
-      - name: Build final aiyouteng.json
+      - name: Final reorder (safe)
         run: |
-          jq --slurpfile p parallel.json --slurpfile s sequence.json '
-            .parses = (
-              [
-                {"name":"并发·主力","type":2,"url":"Parallel"},
-                {"name":"轮询·兜底","type":2,"url":"Sequence"},
-                {"name":"聚合·保底","type":3,"url":"Demo"}
-              ]
-              + $p[0] + $s[0]
+          jq '
+            .parses |= (
+              sort_by(
+                if .url=="Parallel" or .url=="Sequence" or .url=="Demo" then 9999
+                else (.url | length)
+                end
+              )
             )
           ' base.json > aiyouteng.json
 
-      - name: Commit changes
+      - name: Commit
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add aiyouteng.json parses_stats.json
-          git diff --cached --quiet || git commit -m "evolve parses with learning"
+          git diff --cached --quiet || git commit -m "platform-aware parse evolution v3"
           git push
