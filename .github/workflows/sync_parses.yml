@@ -2,8 +2,8 @@ name: TVBox 精确同步
 
 on:
   schedule:
-    - cron: '0 0 * * *'
-  workflow_dispatch:
+    - cron: '0 0 * * *'  # 每天 UTC 时间 00:00 运行（北京时间 08:00）
+  workflow_dispatch:     # 允许手动触发
   push:
     branches: [ main ]
 
@@ -25,80 +25,78 @@ jobs:
 
     - name: 下载源文件
       run: |
+        # 下载源仓库的 dianshi.json
         curl -s -o source.json "https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json"
 
-    - name: 安全处理 JSON
+    - name: 精确同步处理
       run: |
-        cat > process_json.py << 'EOF'
+        cat > sync.py << 'EOF'
         import json
         import os
         
         # 读取源文件
         with open('source.json', 'r', encoding='utf-8') as f:
-            source = json.load(f)
+            source_data = json.load(f)
         
-        # 定义必须优先的 sites 键值
+        # 读取当前文件
+        try:
+            with open('dianshi.json', 'r', encoding='utf-8') as f:
+                current_data = json.load(f)
+        except:
+            current_data = source_data.copy()
+        
+        # 定义必须优先的 sites 键值（按照你文档中的精确顺序）
         priority_keys = [
+            "drpy_js_优酷",
+            "drpy_js_腾云驾雾", 
             "drpy_js_360影视",
-            "drpy_js_百忙无果", 
-            "drpy_js_腾云驾雾",
+            "drpy_js_百忙无果",
             "drpy_js_奇珍异兽",
-            "drpy_js_菜狗",
-            "drpy_js_优酷"
+            "drpy_js_菜狗"
         ]
         
-        def convert_path(path_value):
-            """安全地转换路径"""
-            if not isinstance(path_value, str):
-                return path_value
+        def sync_sites():
+            """同步 sites 数组，保持你的精确顺序"""
+            # 从源数据获取所有 sites
+            source_sites_dict = {site['key']: site for site in source_data.get('sites', [])}
             
-            if path_value.startswith('./lib/'):
-                return f'https://github.com/qist/tvbox/blob/master/lib/{os.path.basename(path_value)}'
-            elif path_value.startswith('./js/'):
-                return f'https://github.com/qist/tvbox/blob/master/js/{os.path.basename(path_value)}'
-            elif path_value.startswith('./'):
-                return f'https://github.com/qist/tvbox/blob/master/{path_value[2:]}'
-            return path_value
+            # 创建新的 sites 列表
+            new_sites = []
+            
+            # 1. 先添加优先级 sites（按照你文档中的精确顺序）
+            for key in priority_keys:
+                if key in source_sites_dict:
+                    new_sites.append(source_sites_dict[key])
+            
+            # 2. 添加其他 sites（保持源数据中的顺序）
+            for site in source_data.get('sites', []):
+                if site['key'] not in priority_keys and site['key'] not in [s['key'] for s in new_sites]:
+                    new_sites.append(site)
+            
+            return new_sites
         
-        # 处理 sites
-        priority_sites = []
-        other_sites = []
+        # 构建最终结果 - 完全保持当前文件的结构
+        result = current_data.copy()
         
-        for site in source.get('sites', []):
-            if site.get('key') in priority_keys:
-                # 处理优先级 sites
-                processed = site.copy()
-                if 'api' in processed:
-                    processed['api'] = convert_path(processed['api'])
-                if 'ext' in processed and isinstance(processed['ext'], str):
-                    processed['ext'] = convert_path(processed['ext'])
-                priority_sites.append(processed)
-            else:
-                # 其他 sites
-                processed = site.copy()
-                if 'api' in processed:
-                    processed['api'] = convert_path(processed['api'])
-                if 'ext' in processed and isinstance(processed['ext'], str):
-                    processed['ext'] = convert_path(processed['ext'])
-                other_sites.append(processed)
+        # 只更新 sites 内容，保持其他所有字段不变
+        result['sites'] = sync_sites()
         
-        # 组合结果
-        result = source.copy()
-        result['sites'] = priority_sites + other_sites
-        
-        # 写入文件
+        # 写入文件，保持完全相同的格式（2空格缩进）
         with open('dianshi.json', 'w', encoding='utf-8') as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
         
-        print("✅ JSON 处理完成")
+        print("✅ 同步完成，保持了你文档的精确格式和顺序")
         EOF
         
-        python3 process_json.py
+        python3 sync.py
 
-    - name: 提交更改
+    - name: 检查并提交更改
       run: |
         git add dianshi.json
         if ! git diff --staged --quiet; then
-          git commit -m "🔄 同步 dianshi.json - $(date +'%Y-%m-%d %H:%M')"
+          git commit -m "🔄 自动同步 dianshi.json - $(date +'%Y-%m-%d %H:%M')"
           git push
+          echo "✅ 更改已提交"
+        else
+          echo "📝 无变化，无需提交"
         fi
