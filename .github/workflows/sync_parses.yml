@@ -1,102 +1,123 @@
-name: TVBox 精确同步
+name: 🔄 TVBox 配置同步更新
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # 每天 UTC 时间 00:00 运行（北京时间 08:00）
+    - cron: '0 8 * * *'  # 每天北京时间16:00运行
   workflow_dispatch:     # 允许手动触发
   push:
     branches: [ main ]
 
 jobs:
-  sync-dianshi:
+  sync-config:
     runs-on: ubuntu-latest
     
     steps:
-    - name: 检出代码
+    - name: 🚀 检出代码
       uses: actions/checkout@v4
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         fetch-depth: 0
 
-    - name: 设置 Git 配置
+    - name: ⚙️ 设置 Git 配置
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
 
-    - name: 下载源文件
+    - name: 📥 下载源配置文件
       run: |
-        # 下载源仓库的 dianshi.json
+        # 下载 qist/tvbox 的 dianshi.json
         curl -s -o source.json "https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json"
+        echo "✅ 源配置文件下载完成"
 
-    - name: 精确同步处理
+    - name: 🔄 智能同步处理
       run: |
-        cat > sync.py << 'EOF'
+        cat > sync_script.py << 'EOF'
         import json
         import os
         
-        # 读取源文件
+        print("📖 开始同步处理...")
+        
+        # 读取源配置文件
         with open('source.json', 'r', encoding='utf-8') as f:
             source_data = json.load(f)
         
-        # 读取当前文件
-        try:
-            with open('dianshi.json', 'r', encoding='utf-8') as f:
+        # 读取当前配置文件（如果存在）
+        current_file = 'dianshi.json'
+        if os.path.exists(current_file):
+            with open(current_file, 'r', encoding='utf-8') as f:
                 current_data = json.load(f)
-        except:
-            current_data = source_data.copy()
+            print("✅ 当前配置文件已加载")
+        else:
+            current_data = {}
+            print("⚠️  当前配置文件不存在，将创建新文件")
         
-        # 定义必须优先的 sites 键值（按照你文档中的精确顺序）
-        priority_keys = [
-            "drpy_js_优酷",
-            "drpy_js_腾云驾雾", 
-            "drpy_js_360影视",
-            "drpy_js_百忙无果",
-            "drpy_js_奇珍异兽",
-            "drpy_js_菜狗"
-        ]
+        # 关键：将所有相对路径转换为 GitHub RAW 绝对路径
+        def convert_paths(data):
+            if isinstance(data, dict):
+                for key, value in data.items():
+                    if isinstance(value, str):
+                        # 转换 ./ 开头的相对路径
+                        if value.startswith('./'):
+                            new_value = value.replace('./', 'https://raw.githubusercontent.com/qist/tvbox/master/')
+                            data[key] = new_value
+                            print(f"🔄 转换路径: {value} -> {new_value}")
+                    elif isinstance(value, dict):
+                        convert_paths(value)
+                    elif isinstance(value, list):
+                        for item in value:
+                            convert_paths(item)
+            elif isinstance(data, list):
+                for item in data:
+                    convert_paths(item)
         
-        def sync_sites():
-            """同步 sites 数组，保持你的精确顺序"""
-            # 从源数据获取所有 sites
-            source_sites_dict = {site['key']: site for site in source_data.get('sites', [])}
-            
-            # 创建新的 sites 列表
-            new_sites = []
-            
-            # 1. 先添加优先级 sites（按照你文档中的精确顺序）
-            for key in priority_keys:
-                if key in source_sites_dict:
-                    new_sites.append(source_sites_dict[key])
-            
-            # 2. 添加其他 sites（保持源数据中的顺序）
-            for site in source_data.get('sites', []):
-                if site['key'] not in priority_keys and site['key'] not in [s['key'] for s in new_sites]:
-                    new_sites.append(site)
-            
-            return new_sites
+        # 转换源数据中的所有路径
+        print("🔧 转换相对路径为绝对路径...")
+        convert_paths(source_data)
         
-        # 构建最终结果 - 完全保持当前文件的结构
-        result = current_data.copy()
+        # 构建最终配置（优先使用源数据，保留当前文件的自定义设置）
+        final_config = source_data  # 使用转换后的源数据
         
-        # 只更新 sites 内容，保持其他所有字段不变
-        result['sites'] = sync_sites()
+        # 如果当前文件有自定义配置，可以在这里合并
+        # 例如保留当前文件的特定站点或设置
         
-        # 写入文件，保持完全相同的格式（2空格缩进）
-        with open('dianshi.json', 'w', encoding='utf-8') as f:
-            json.dump(result, f, ensure_ascii=False, indent=2)
+        # 写入最终配置文件
+        with open(current_file, 'w', encoding='utf-8') as f:
+            json.dump(final_config, f, ensure_ascii=False, indent=2, separators=(',', ': '))
         
-        print("✅ 同步完成，保持了你文档的精确格式和顺序")
+        print("✅ 配置文件同步完成")
+        
+        # 显示同步统计
+        sites_count = len(final_config.get('sites', []))
+        parses_count = len(final_config.get('parses', []))
+        print(f"📊 同步统计: {sites_count} 个站点, {parses_count} 个解析接口")
         EOF
         
-        python3 sync.py
+        python3 sync_script.py
 
-    - name: 检查并提交更改
+    - name: 📊 验证配置文件
+      run: |
+        if [ -f dianshi.json ]; then
+          echo "✅ 配置文件生成成功"
+          echo "文件大小: $(wc -c < dianshi.json) 字节"
+          echo "站点数量: $(grep -o '"key"' dianshi.json | wc -l) 个"
+        else
+          echo "❌ 配置文件生成失败"
+          exit 1
+        fi
+
+    - name: 📤 提交更改
       run: |
         git add dianshi.json
         if ! git diff --staged --quiet; then
-          git commit -m "🔄 自动同步 dianshi.json - $(date +'%Y-%m-%d %H:%M')"
+          git commit -m "🔄 自动同步TVBox配置 - $(date +'%Y-%m-%d %H:%M')"
           git push
-          echo "✅ 更改已提交"
+          echo "✅ 更改已提交到仓库"
         else
-          echo "📝 无变化，无需提交"
+          echo "📝 无新变化，无需提交"
         fi
+
+    - name: 🔔 通知结果
+      run: |
+        echo "🎉 TVBox配置同步完成！"
+        echo "📅 下次自动同步: 明天 16:00"
+        echo "🔗 配置文件地址: https://raw.githubusercontent.com/${{ github.repository }}/main/dianshi.json"
