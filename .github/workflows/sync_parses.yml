@@ -1,142 +1,121 @@
-name: 🔄 TVBox 完整同步（顺序+路径转换）
+name: TVBox Parses Evolution (Stable)
+
+permissions:
+  contents: write
 
 on:
   schedule:
-    - cron: '0 8 * * *'  # 每天UTC 8点（北京时间16点）
+    - cron: "0 */6 * * *"
   workflow_dispatch:
-  push:
-    branches: [ main ]
 
 jobs:
-  sync-config:
+  sync:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: 🚀 检出代码
-      uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        fetch-depth: 0
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-    - name: ⚙️ 设置 Git 配置
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq curl
 
-    - name: 📥 下载源配置
-      run: |
-        curl -s -o source.json "https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json"
+      - name: Fetch upstream dianshi.json
+        run: |
+          curl -L -o upstream.json \
+          https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json
 
-    - name: 🔄 完整处理（顺序+路径转换）
-      run: |
-        cat > sync.py << 'EOF'
-        import json
-        import os
-        import re
-        
-        # 读取源配置
-        with open('source.json', 'r', encoding='utf-8') as f:
-            source_data = json.load(f)
-        
-        # 定义必须优先的 sites 键值（按照您的模板顺序）
-        priority_keys = [
-            "drpy_js_优酷",
-            "drpy_js_腾云驾雾", 
-            "drpy_js_360影视",
-            "drpy_js_百忙无果",
-            "drpy_js_奇珍异兽",
-            "drpy_js_菜狗"
-        ]
-        
-        def convert_relative_paths(data):
-            """递归转换所有相对路径为绝对路径"""
-            if isinstance(data, dict):
-                for key, value in data.items():
-                    if isinstance(value, str):
-                        # 转换 ./ 开头的相对路径
-                        if value.startswith('./'):
-                            # 转换为 GitHub RAW 绝对路径
-                            new_value = value.replace('./', 'https://raw.githubusercontent.com/qist/tvbox/master/')
-                            data[key] = new_value
-                            print(f"🔄 转换路径: {value} -> {new_value}")
-                    elif isinstance(value, (dict, list)):
-                        convert_relative_paths(value)
-            elif isinstance(data, list):
-                for item in data:
-                    convert_relative_paths(item)
-        
-        def reorder_sites(sites):
-            """重新排序 sites，保持您的优先顺序"""
-            new_sites = []
-            sites_dict = {site['key']: site for site in sites}
-            
-            # 1. 先添加优先级 sites（按您的顺序）
-            for key in priority_keys:
-                if key in sites_dict:
-                    new_sites.append(sites_dict[key])
-            
-            # 2. 添加其他 sites（保持源顺序）
-            for site in sites:
-                if site['key'] not in priority_keys and site['key'] not in [s['key'] for s in new_sites]:
-                    new_sites.append(site)
-            
-            return new_sites
-        
-        # 深度复制源数据
-        import copy
-        result = copy.deepcopy(source_data)
-        
-        print("🔄 开始转换相对路径...")
-        # 转换所有相对路径
-        convert_relative_paths(result)
-        
-        print("🔄 开始重新排序 sites...")
-        # 重新排序 sites
-        if 'sites' in result:
-            result['sites'] = reorder_sites(result['sites'])
-        
-        # 写入最终配置文件
-        with open('dianshi.json', 'w', encoding='utf-8') as f:
-            json.dump(result, f, ensure_ascii=False, indent=2)
-        
-        # 统计信息
-        sites_count = len(result.get('sites', []))
-        print(f"✅ 同步完成！")
-        print(f"📊 共处理 {sites_count} 个站点")
-        print(f"📁 前6个站点顺序: {priority_keys[:6]}")
-        EOF
-        
-        python3 sync.py
+      - name: Init stats (safe)
+        run: |
+          [ -f parses_stats.json ] || echo '{}' > parses_stats.json
 
-    - name: 🔍 验证转换结果
-      run: |
-        echo "🔍 验证转换结果："
-        echo "文件大小: $(wc -c < dianshi.json) 字节"
-        echo "站点总数: $(grep -c '"key"' dianshi.json) 个"
-        echo "前6个站点顺序:"
-        grep -A1 '"key": "drpy_js' dianshi.json | head -12 | grep '"key"'
-        echo ""
-        echo "📁 路径转换验证:"
-        grep -E '"(spider|url|api|ext|jar)"' dianshi.json | head -5
+      - name: Normalize upstream → base.json
+        run: |
+          jq '
+            .parses = (
+              .parses
+              | map(
+                  if .name == "Json聚合" and .type == 3 and .url == "Demo" then
+                    [
+                      {"name":"解析聚合","type":3,"url":"Demo"},
+                      {"name":"Json并发","type":2,"url":"Parallel"},
+                      {"name":"Json轮询","type":2,"url":"Sequence"}
+                    ]
+                  else
+                    .
+                  end
+                )
+              | flatten
+            )
+            | .spider = "https://raw.githubusercontent.com/qist/tvbox/master/jar/fan.txt;md5;3962e9dbce2c7b61a53b1b796f098d47"
+          ' upstream.json > base.json
 
-    - name: 📤 提交更改
-      run: |
-        git add dianshi.json
-        if ! git diff --staged --quiet; then
-          git commit -m "🔄 完整同步TVBox配置（顺序+路径转换） - $(date +'%Y-%m-%d %H:%M')"
+      - name: Auto group + learning
+        run: |
+          MAX_PARALLEL=6
+          FAST=()
+          SLOW=()
+
+          jq -c '.parses[]' base.json | while read -r item; do
+            url=$(echo "$item" | jq -r '.url')
+
+            if [[ "$url" == "Demo" || "$url" == "Parallel" || "$url" == "Sequence" ]]; then
+              continue
+            fi
+
+            key=$(echo -n "$url" | md5sum | cut -d' ' -f1)
+            ok=$(jq -r ".\"$key\".ok // 0" parses_stats.json)
+            total=$(jq -r ".\"$key\".total // 0" parses_stats.json)
+
+            start=$(date +%s%3N)
+            if curl -k -L -A "Mozilla/5.0" \
+                --range 0-0 \
+                --connect-timeout 4 \
+                --max-time 6 \
+                -s "$url" >/dev/null; then
+              hit=1
+            else
+              hit=0
+            fi
+            end=$(date +%s%3N)
+            cost=$((end - start))
+
+            jq ".\"$key\" = {ok: ($ok + $hit), total: ($total + 1)}" \
+              parses_stats.json > tmp && mv tmp parses_stats.json
+
+            score=$(( (ok * 100 / (total + 1)) - cost ))
+
+            if [[ $hit -eq 1 && $cost -le 3000 ]]; then
+              FAST+=("$item")
+            else
+              SLOW+=("$item")
+            fi
+          done
+
+          printf '%s\n' "${FAST[@]}" | head -n $MAX_PARALLEL > fast.txt
+          printf '%s\n' "${FAST[@]:$MAX_PARALLEL}" "${SLOW[@]}" > slow.txt
+
+          jq -s '.' fast.txt > parallel.json
+          jq -s '.' slow.txt > sequence.json
+
+      - name: Build final aiyouteng.json
+        run: |
+          jq --slurpfile p parallel.json --slurpfile s sequence.json '
+            .parses = (
+              [
+                {"name":"并发·主力","type":2,"url":"Parallel"},
+                {"name":"轮询·兜底","type":2,"url":"Sequence"},
+                {"name":"聚合·保底","type":3,"url":"Demo"}
+              ]
+              + $p[0] + $s[0]
+            )
+          ' base.json > aiyouteng.json
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add aiyouteng.json parses_stats.json
+          git diff --cached --quiet || git commit -m "evolve parses with learning"
           git push
-          echo "✅ 更改已提交"
-        else
-          echo "📝 无变化，无需提交"
-        fi
-
-    - name: 📋 最终验证
-      run: |
-        echo "🎉 同步完成！"
-        echo "📅 下次自动同步: 明天 16:00"
-        echo "🔗 配置文件地址: https://raw.githubusercontent.com/${{ github.repository }}/main/dianshi.json"
-        echo ""
-        echo "✅ 已完成："
-        echo "   ✓ 保持您指定的 sites 顺序"
-        echo "   ✓ 转换所有相对路径为绝对路径"
-        echo "   ✓ 保持完整配置结构"
