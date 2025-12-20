@@ -12,8 +12,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # 获取完整提交历史
+          fetch-depth: 0
 
+      - name: Debug - 查看源数据格式
+        run: |
+          curl -s https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json | head -c 500
+          echo ""
+          echo "=== 查看数据结构 ==="
+          curl -s https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json | python3 -c "import json, sys; data=json.load(sys.stdin); print(f'类型: {type(data)}'); print(f'键: {list(data.keys())}');"
+        
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -27,7 +34,7 @@ jobs:
           cat << 'EOF' > sync.py
           import json
           import requests
-          import os
+          import sys
           
           def sync_config():
               try:
@@ -45,32 +52,104 @@ jobs:
                   ]
                   
                   # 获取源数据
+                  print("正在获取源数据...")
                   response = requests.get(source_url)
-                  response.raise_for_status()  # 检查请求是否成功
+                  response.raise_for_status()
                   source_data = response.json()
+                  
+                  print(f"源数据JSON键: {list(source_data.keys())}")
+                  print(f"源数据类型: {type(source_data)}")
+                  
+                  # TVBox配置文件有多种格式，需要根据实际情况处理
+                  # 常见格式1: 直接是数组
+                  # 常见格式2: {"sites": [...]}
+                  # 常见格式3: {"store": {"sites": [...]}}
+                  # 常见格式4: {"spider": "xxx", "sites": [...]}
+                  
+                  all_sites = []
+                  
+                  if isinstance(source_data, list):
+                      # 格式1: 直接是数组
+                      all_sites = source_data
+                      print("检测到格式: 直接数组")
+                      
+                  elif "sites" in source_data:
+                      # 格式2: 包含sites键
+                      all_sites = source_data["sites"]
+                      print("检测到格式: 包含sites键")
+                      
+                  elif "store" in source_data and isinstance(source_data["store"], dict) and "sites" in source_data["store"]:
+                      # 格式3: store -> sites
+                      all_sites = source_data["store"]["sites"]
+                      print("检测到格式: store -> sites")
+                      
+                  else:
+                      # 其他格式，尝试查找数组类型的值
+                      print("尝试自动检测sites数组...")
+                      for key, value in source_data.items():
+                          if isinstance(value, list) and len(value) > 0 and "key" in value[0]:
+                              all_sites = value
+                              print(f"在键 '{key}' 中找到sites数组")
+                              break
+                  
+                  if not all_sites:
+                      print("警告: 未找到sites数组，尝试使用所有值")
+                      # 如果没有找到sites，尝试处理整个数据结构
+                      for key, value in source_data.items():
+                          if isinstance(value, list):
+                              all_sites = value
+                              break
+                  
+                  print(f"找到 {len(all_sites)} 个源")
                   
                   # 创建新列表，先添加优先级项目
                   new_data = priority_items.copy()
                   
                   # 添加源数据中不在优先级列表中的项目
-                  for item in source_data:
-                      if not any(pi["key"] == item["key"] for pi in priority_items):
-                          new_data.append(item)
+                  priority_keys = {item["key"] for item in priority_items}
+                  for item in all_sites:
+                      if isinstance(item, dict) and "key" in item:
+                          if item["key"] not in priority_keys:
+                              new_data.append(item)
+                  
+                  print(f"处理后共有 {len(new_data)} 个源")
+                  
+                  # 如果是JSON对象格式，需要保持结构
+                  final_output = []
+                  if isinstance(source_data, dict):
+                      # 重新构造完整的JSON结构
+                      final_output = new_data
+                  else:
+                      final_output = new_data
                   
                   # 保存到文件
                   with open("aiyouteng.json", "w", encoding="utf-8") as f:
-                      json.dump(new_data, f, ensure_ascii=False, indent=2)
+                      json.dump(final_output, f, ensure_ascii=False, indent=2)
+                  
+                  print("同步成功！")
                   return True
+                  
               except Exception as e:
+                  import traceback
                   print(f"同步失败: {str(e)}")
+                  print(f"详细错误: {traceback.format_exc()}")
                   return False
           
           if __name__ == "__main__":
               success = sync_config()
-              exit(0 if success else 1)
+              sys.exit(0 if success else 1)
           EOF
           
           python sync.py
+
+      - name: Debug - 查看输出文件
+        if: success()
+        run: |
+          echo "=== 输出文件前5行 ==="
+          head -n 10 aiyouteng.json
+          echo ""
+          echo "=== 文件大小 ==="
+          wc -l aiyouteng.json
 
       - name: Commit and push changes
         if: success()
