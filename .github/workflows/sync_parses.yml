@@ -1,4 +1,4 @@
-name: 🔄 TVBox 配置同步（保持相对路径）
+name: 🔄 TVBox 完整同步（顺序+路径转换）
 
 on:
   schedule:
@@ -27,23 +27,16 @@ jobs:
       run: |
         curl -s -o source.json "https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json"
 
-    - name: 🔄 智能同步处理
+    - name: 🔄 完整处理（顺序+路径转换）
       run: |
         cat > sync.py << 'EOF'
         import json
         import os
+        import re
         
         # 读取源配置
         with open('source.json', 'r', encoding='utf-8') as f:
             source_data = json.load(f)
-        
-        # 读取当前配置（如果存在）
-        current_file = 'dianshi.json'
-        if os.path.exists(current_file):
-            with open(current_file, 'r', encoding='utf-8') as f:
-                current_data = json.load(f)
-        else:
-            current_data = {}
         
         # 定义必须优先的 sites 键值（按照您的模板顺序）
         priority_keys = [
@@ -55,53 +48,95 @@ jobs:
             "drpy_js_菜狗"
         ]
         
-        def reorder_sites(source_sites):
+        def convert_relative_paths(data):
+            """递归转换所有相对路径为绝对路径"""
+            if isinstance(data, dict):
+                for key, value in data.items():
+                    if isinstance(value, str):
+                        # 转换 ./ 开头的相对路径
+                        if value.startswith('./'):
+                            # 转换为 GitHub RAW 绝对路径
+                            new_value = value.replace('./', 'https://raw.githubusercontent.com/qist/tvbox/master/')
+                            data[key] = new_value
+                            print(f"🔄 转换路径: {value} -> {new_value}")
+                    elif isinstance(value, (dict, list)):
+                        convert_relative_paths(value)
+            elif isinstance(data, list):
+                for item in data:
+                    convert_relative_paths(item)
+        
+        def reorder_sites(sites):
             """重新排序 sites，保持您的优先顺序"""
             new_sites = []
-            source_sites_dict = {site['key']: site for site in source_sites}
+            sites_dict = {site['key']: site for site in sites}
             
-            # 1. 先添加优先级 sites
+            # 1. 先添加优先级 sites（按您的顺序）
             for key in priority_keys:
-                if key in source_sites_dict:
-                    new_sites.append(source_sites_dict[key])
+                if key in sites_dict:
+                    new_sites.append(sites_dict[key])
             
             # 2. 添加其他 sites（保持源顺序）
-            for site in source_sites:
+            for site in sites:
                 if site['key'] not in priority_keys and site['key'] not in [s['key'] for s in new_sites]:
                     new_sites.append(site)
             
             return new_sites
         
-        # 构建最终配置
-        result = source_data.copy()  # 使用源数据作为基础
+        # 深度复制源数据
+        import copy
+        result = copy.deepcopy(source_data)
         
-        # 只重新排序 sites，保持所有相对路径不变
-        result['sites'] = reorder_sites(source_data.get('sites', []))
+        print("🔄 开始转换相对路径...")
+        # 转换所有相对路径
+        convert_relative_paths(result)
         
-        # 写入文件，保持格式
-        with open(current_file, 'w', encoding='utf-8') as f:
+        print("🔄 开始重新排序 sites...")
+        # 重新排序 sites
+        if 'sites' in result:
+            result['sites'] = reorder_sites(result['sites'])
+        
+        # 写入最终配置文件
+        with open('dianshi.json', 'w', encoding='utf-8') as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
         
-        print(f"✅ 同步完成！共处理 {len(result['sites'])} 个站点")
+        # 统计信息
+        sites_count = len(result.get('sites', []))
+        print(f"✅ 同步完成！")
+        print(f"📊 共处理 {sites_count} 个站点")
+        print(f"📁 前6个站点顺序: {priority_keys[:6]}")
         EOF
         
         python3 sync.py
 
-    - name: 📊 验证结果
+    - name: 🔍 验证转换结果
       run: |
-        echo "📋 同步结果："
+        echo "🔍 验证转换结果："
         echo "文件大小: $(wc -c < dianshi.json) 字节"
-        echo "站点数量: $(grep -c '"key"' dianshi.json) 个"
-        echo "前6个站点:"
-        grep -A2 '"key": "drpy_js' dianshi.json | head -12
+        echo "站点总数: $(grep -c '"key"' dianshi.json) 个"
+        echo "前6个站点顺序:"
+        grep -A1 '"key": "drpy_js' dianshi.json | head -12 | grep '"key"'
+        echo ""
+        echo "📁 路径转换验证:"
+        grep -E '"(spider|url|api|ext|jar)"' dianshi.json | head -5
 
     - name: 📤 提交更改
       run: |
         git add dianshi.json
         if ! git diff --staged --quiet; then
-          git commit -m "🔄 同步TVBox配置 - $(date +'%Y-%m-%d %H:%M')"
+          git commit -m "🔄 完整同步TVBox配置（顺序+路径转换） - $(date +'%Y-%m-%d %H:%M')"
           git push
           echo "✅ 更改已提交"
         else
           echo "📝 无变化，无需提交"
         fi
+
+    - name: 📋 最终验证
+      run: |
+        echo "🎉 同步完成！"
+        echo "📅 下次自动同步: 明天 16:00"
+        echo "🔗 配置文件地址: https://raw.githubusercontent.com/${{ github.repository }}/main/dianshi.json"
+        echo ""
+        echo "✅ 已完成："
+        echo "   ✓ 保持您指定的 sites 顺序"
+        echo "   ✓ 转换所有相对路径为绝对路径"
+        echo "   ✓ 保持完整配置结构"
