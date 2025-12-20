@@ -1,9 +1,14 @@
-name: Sync TVBox Config
+name: Auto Sync TVBox Config
 
 on:
   schedule:
     - cron: '0 0 * * *'  # 每天UTC时间0点运行(北京时间8点)
   workflow_dispatch:     # 允许手动触发
+  push:
+    branches: [ master ]
+
+permissions:
+  contents: write
 
 jobs:
   sync-config:
@@ -14,13 +19,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Debug - 查看源数据格式
-        run: |
-          curl -s https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json | head -c 500
-          echo ""
-          echo "=== 查看数据结构 ==="
-          curl -s https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json | python3 -c "import json, sys; data=json.load(sys.stdin); print(f'类型: {type(data)}'); print(f'键: {list(data.keys())}');"
-        
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -29,110 +27,159 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      - name: Run sync script
+      - name: Create sync script
         run: |
           cat << 'EOF' > sync.py
           import json
           import requests
+          import hashlib
           import sys
           
           def sync_config():
               try:
-                  # 源和目标URL
+                  print("🚀 开始同步TVBox配置...")
+                  
+                  # 您的模板配置文件
+                  template_url = "https://raw.githubusercontent.com/city10666/tvbox0821/master/dianshi.json"
+                  # 源仓库配置文件
                   source_url = "https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json"
                   
-                  # 指定要前置的项目
-                  priority_items = [
-                      {"key": "drpy_js_360影视","name": "官源 | 360[js]","type": 3,"api": "./lib/drpy2.min.js","ext": "./js/360影视.js"},
-                      {"key": "drpy_js_百忙无果","name": "官源 | 芒果[js]","type": 3,"api": "./lib/drpy2.min.js","ext": "./js/百忙无果.js"},
-                      {"key": "drpy_js_腾云驾雾","name": "官源 | 腾讯[js]","type": 3,"api": "./lib/drpy2.min.js","ext": "./js/腾云驾雾.js"},
-                      {"key": "drpy_js_奇珍异兽","name": "官源 | 爱奇艺[js]","type": 3,"api": "./lib/drpy2.min.js","ext": "./js/奇珍异兽.js"},
-                      {"key": "drpy_js_菜狗","name": "官源 | 搜狗[js]","type": 3,"api": "./lib/drpy2.min.js","ext": "./js/菜狗.js"},
-                      {"key": "drpy_js_优酷","name": "官源 | 优酷[js]","type": 3,"api": "./lib/drpy2.min.js","ext": "./js/优酷.js"}
+                  print("📥 获取模板配置...")
+                  template_resp = requests.get(template_url, timeout=30)
+                  template_resp.raise_for_status()
+                  template_data = template_resp.json()
+                  
+                  print("📥 获取源配置...")
+                  source_resp = requests.get(source_url, timeout=30)
+                  source_resp.raise_for_status()
+                  source_data = source_resp.json()
+                  
+                  print("🔍 分析数据结构...")
+                  
+                  # 提取模板中的sites（保持您指定的前6个顺序）
+                  template_sites = template_data.get("sites", [])
+                  
+                  # 提取源中的sites
+                  source_sites = []
+                  if isinstance(source_data, dict) and "sites" in source_data:
+                      source_sites = source_data["sites"]
+                  elif isinstance(source_data, list):
+                      source_sites = source_data
+                  
+                  print(f"📊 模板中有 {len(template_sites)} 个站点")
+                  print(f"📊 源中有 {len(source_sites)} 个站点")
+                  
+                  # 创建源站点的key映射
+                  source_sites_map = {}
+                  for site in source_sites:
+                      if isinstance(site, dict) and "key" in site:
+                          source_sites_map[site["key"]] = site
+                  
+                  print(f"🗺️ 创建了 {len(source_sites_map)} 个源站点映射")
+                  
+                  # 定义必须保留在前6位的站点key
+                  priority_keys = [
+                      "drpy_js_360影视",
+                      "drpy_js_百忙无果", 
+                      "drpy_js_腾云驾雾",
+                      "drpy_js_奇珍异兽",
+                      "drpy_js_菜狗",
+                      "drpy_js_优酷"
                   ]
                   
-                  # 获取源数据
-                  print("正在获取源数据...")
-                  response = requests.get(source_url)
-                  response.raise_for_status()
-                  source_data = response.json()
+                  # 第一步：确保前6个站点按指定顺序排列
+                  new_sites = []
+                  processed_keys = set()
                   
-                  print(f"源数据JSON键: {list(source_data.keys())}")
-                  print(f"源数据类型: {type(source_data)}")
-                  
-                  # TVBox配置文件有多种格式，需要根据实际情况处理
-                  # 常见格式1: 直接是数组
-                  # 常见格式2: {"sites": [...]}
-                  # 常见格式3: {"store": {"sites": [...]}}
-                  # 常见格式4: {"spider": "xxx", "sites": [...]}
-                  
-                  all_sites = []
-                  
-                  if isinstance(source_data, list):
-                      # 格式1: 直接是数组
-                      all_sites = source_data
-                      print("检测到格式: 直接数组")
-                      
-                  elif "sites" in source_data:
-                      # 格式2: 包含sites键
-                      all_sites = source_data["sites"]
-                      print("检测到格式: 包含sites键")
-                      
-                  elif "store" in source_data and isinstance(source_data["store"], dict) and "sites" in source_data["store"]:
-                      # 格式3: store -> sites
-                      all_sites = source_data["store"]["sites"]
-                      print("检测到格式: store -> sites")
-                      
-                  else:
-                      # 其他格式，尝试查找数组类型的值
-                      print("尝试自动检测sites数组...")
-                      for key, value in source_data.items():
-                          if isinstance(value, list) and len(value) > 0 and "key" in value[0]:
-                              all_sites = value
-                              print(f"在键 '{key}' 中找到sites数组")
+                  # 1. 添加前6个优先级站点
+                  for key in priority_keys:
+                      # 先在模板中找
+                      template_site = None
+                      for site in template_sites:
+                          if site.get("key") == key:
+                              template_site = site
                               break
+                      
+                      # 在源中找
+                      source_site = source_sites_map.get(key)
+                      
+                      if source_site:
+                          # 优先使用源的数据，但保留模板的name（如果有）
+                          merged_site = source_site.copy()
+                          if template_site and "name" in template_site:
+                              merged_site["name"] = template_site["name"]
+                          new_sites.append(merged_site)
+                          print(f"✅ 更新优先级站点: {key}")
+                      elif template_site:
+                          new_sites.append(template_site)
+                          print(f"⚠️  使用模板优先级站点: {key}")
+                      else:
+                          print(f"❌ 未找到优先级站点: {key}")
+                      
+                      processed_keys.add(key)
                   
-                  if not all_sites:
-                      print("警告: 未找到sites数组，尝试使用所有值")
-                      # 如果没有找到sites，尝试处理整个数据结构
-                      for key, value in source_data.items():
-                          if isinstance(value, list):
-                              all_sites = value
-                              break
+                  # 第二步：处理模板中的其他站点（保持模板顺序）
+                  for template_site in template_sites:
+                      if not isinstance(template_site, dict) or "key" not in template_site:
+                          new_sites.append(template_site)
+                          continue
+                          
+                      key = template_site["key"]
+                      if key in processed_keys:
+                          continue
+                          
+                      processed_keys.add(key)
+                      
+                      if key in source_sites_map:
+                          # 使用源的数据，但保留模板的name
+                          source_site = source_sites_map[key]
+                          merged_site = source_site.copy()
+                          merged_site["name"] = template_site.get("name", source_site.get("name", ""))
+                          new_sites.append(merged_site)
+                          print(f"✅ 更新站点: {key}")
+                      else:
+                          new_sites.append(template_site)
+                          print(f"📋 保留模板站点: {key}")
                   
-                  print(f"找到 {len(all_sites)} 个源")
+                  # 第三步：添加源中有但模板中没有的新站点
+                  for key, source_site in source_sites_map.items():
+                      if key not in processed_keys:
+                          new_sites.append(source_site)
+                          print(f"➕ 添加新站点: {key}")
                   
-                  # 创建新列表，先添加优先级项目
-                  new_data = priority_items.copy()
+                  print(f"🎯 最终站点数量: {len(new_sites)}")
                   
-                  # 添加源数据中不在优先级列表中的项目
-                  priority_keys = {item["key"] for item in priority_items}
-                  for item in all_sites:
-                      if isinstance(item, dict) and "key" in item:
-                          if item["key"] not in priority_keys:
-                              new_data.append(item)
+                  # 更新spider的MD5（如果需要）
+                  if "spider" in template_data and template_data["spider"]:
+                      spider_url = template_data["spider"].split(';')[0]  # 去掉已有的md5参数
+                      if spider_url.startswith("http"):
+                          print(f"🔧 更新spider MD5...")
+                          try:
+                              spider_resp = requests.get(spider_url, timeout=30)
+                              spider_resp.raise_for_status()
+                              spider_content = spider_resp.content
+                              md5_hash = hashlib.md5(spider_content).hexdigest()
+                              template_data["spider"] = f"{spider_url};md5;{md5_hash}"
+                              print(f"✅ Spider MD5更新为: {md5_hash}")
+                          except Exception as e:
+                              print(f"❌ 更新spider MD5失败: {e}")
                   
-                  print(f"处理后共有 {len(new_data)} 个源")
-                  
-                  # 如果是JSON对象格式，需要保持结构
-                  final_output = []
-                  if isinstance(source_data, dict):
-                      # 重新构造完整的JSON结构
-                      final_output = new_data
-                  else:
-                      final_output = new_data
+                  # 创建最终输出（保持所有原有字段）
+                  output_data = template_data.copy()
+                  output_data["sites"] = new_sites
                   
                   # 保存到文件
-                  with open("aiyouteng.json", "w", encoding="utf-8") as f:
-                      json.dump(final_output, f, ensure_ascii=False, indent=2)
+                  with open("dianshi.json", "w", encoding="utf-8") as f:
+                      json.dump(output_data, f, ensure_ascii=False, indent=2)
                   
-                  print("同步成功！")
+                  print("🎉 同步完成！")
                   return True
                   
               except Exception as e:
                   import traceback
-                  print(f"同步失败: {str(e)}")
-                  print(f"详细错误: {traceback.format_exc()}")
+                  print(f"💥 同步失败: {str(e)}")
+                  print("🔍 错误详情:")
+                  print(traceback.format_exc())
                   return False
           
           if __name__ == "__main__":
@@ -140,21 +187,39 @@ jobs:
               sys.exit(0 if success else 1)
           EOF
           
-          python sync.py
+          echo "📜 同步脚本已创建"
 
-      - name: Debug - 查看输出文件
-        if: success()
+      - name: Run sync script
+        run: python sync.py
+
+      - name: Check for changes
+        id: check-changes
         run: |
-          echo "=== 输出文件前5行 ==="
-          head -n 10 aiyouteng.json
-          echo ""
-          echo "=== 文件大小 ==="
-          wc -l aiyouteng.json
+          git add -N .
+          if git diff --quiet; then
+            echo "没有变化"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "检测到变化"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
 
       - name: Commit and push changes
-        if: success()
+        if: steps.check-changes.outputs.has_changes == 'true'
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
-          git add aiyouteng.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-sync TVBox config" && git push)
+          git add dianshi.json
+          git commit -m "Auto-sync TVBox config $(date +'%Y-%m-%d %H:%M:%S')"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Show completion message
+        if: always()
+        run: |
+          if [[ "${{ steps.check-changes.outputs.has_changes }}" == "true" ]]; then
+            echo "✅ 配置已成功更新并提交"
+          else
+            echo "⏭️  无变化，跳过提交"
+          fi
