@@ -1,85 +1,81 @@
-name: Sync TVBox Parses (Safe)
-
-permissions:
-  contents: write
+name: Sync TVBox Config
 
 on:
   schedule:
-    - cron: "0 */6 * * *"
-  workflow_dispatch:
+    - cron: '0 0 * * *'  # 每天UTC时间0点运行(北京时间8点)
+  workflow_dispatch:     # 允许手动触发
 
 jobs:
-  sync:
+  sync-config:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 获取完整提交历史
 
-      - name: Install tools
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run sync script
         run: |
-          sudo apt-get update
-          sudo apt-get install -y jq curl
+          cat << 'EOF' > sync.py
+          import json
+          import requests
+          import os
+          
+          def sync_config():
+              try:
+                  # 源和目标URL
+                  source_url = "https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json"
+                  
+                  # 指定要前置的项目
+                  priority_items = [
+                      {"key": "drpy_js_360影视","name": "官源 | 360[js]","type": 3,"api": "./lib/drpy2.min.js","ext": "./js/360影视.js"},
+                      {"key": "drpy_js_百忙无果","name": "官源 | 芒果[js]","type": 3,"api": "./lib/drpy2.min.js","ext": "./js/百忙无果.js"},
+                      {"key": "drpy_js_腾云驾雾","name": "官源 | 腾讯[js]","type": 3,"api": "./lib/drpy2.min.js","ext": "./js/腾云驾雾.js"},
+                      {"key": "drpy_js_奇珍异兽","name": "官源 | 爱奇艺[js]","type": 3,"api": "./lib/drpy2.min.js","ext": "./js/奇珍异兽.js"},
+                      {"key": "drpy_js_菜狗","name": "官源 | 搜狗[js]","type": 3,"api": "./lib/drpy2.min.js","ext": "./js/菜狗.js"},
+                      {"key": "drpy_js_优酷","name": "官源 | 优酷[js]","type": 3,"api": "./lib/drpy2.min.js","ext": "./js/优酷.js"}
+                  ]
+                  
+                  # 获取源数据
+                  response = requests.get(source_url)
+                  response.raise_for_status()  # 检查请求是否成功
+                  source_data = response.json()
+                  
+                  # 创建新列表，先添加优先级项目
+                  new_data = priority_items.copy()
+                  
+                  # 添加源数据中不在优先级列表中的项目
+                  for item in source_data:
+                      if not any(pi["key"] == item["key"] for pi in priority_items):
+                          new_data.append(item)
+                  
+                  # 保存到文件
+                  with open("aiyouteng.json", "w", encoding="utf-8") as f:
+                      json.dump(new_data, f, ensure_ascii=False, indent=2)
+                  return True
+              except Exception as e:
+                  print(f"同步失败: {str(e)}")
+                  return False
+          
+          if __name__ == "__main__":
+              success = sync_config()
+              exit(0 if success else 1)
+          EOF
+          
+          python sync.py
 
-      - name: Fetch upstream dianshi.json
+      - name: Commit and push changes
+        if: success()
         run: |
-          curl -L -o upstream.json \
-          https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json
-
-      - name: Sync parses + spider (cert-safe check)
-        run: |
-          # 1. 合并 parses + spider
-          jq --slurpfile up upstream.json '
-            .parses = (
-              $up[0].parses
-              | map(
-                  if .name == "Json聚合" and .type == 3 and .url == "Demo" then
-                    [
-                      {"name":"解析聚合","type":3,"url":"Demo"},
-                      {"name":"Json并发","type":2,"url":"Parallel"},
-                      {"name":"Json轮询","type":2,"url":"Sequence"}
-                    ]
-                  else
-                    .
-                  end
-                )
-              | flatten
-            )
-            | .spider = "https://raw.githubusercontent.com/qist/tvbox/master/jar/fan.txt;md5;3962e9dbce2c7b61a53b1b796f098d47"
-          ' aiyouteng.json > aiyouteng.tmp.json
-
-          # 2. 解析站可用性检测（GET + 忽略证书）
-          jq -c '.parses[]' aiyouteng.tmp.json | while read -r item; do
-            url=$(echo "$item" | jq -r '.url')
-
-            if [[ "$url" == "Demo" || "$url" == "Parallel" || "$url" == "Sequence" ]]; then
-              echo "$item"
-              continue
-            fi
-
-            if curl -k -L \
-                -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
-                --range 0-0 \
-                --connect-timeout 4 \
-                --max-time 6 \
-                -s "$url" >/dev/null; then
-              echo "$item"
-            else
-              echo "❌ 剔除不可用解析：$url" >&2
-            fi
-          done | jq -s '.' > parses.ok.json
-
-          # 3. 写回并覆盖
-          jq --slurpfile parses parses.ok.json '
-            .parses = $parses[0]
-          ' aiyouteng.tmp.json > aiyouteng.json
-
-          rm -f aiyouteng.tmp.json parses.ok.json
-
-      - name: Commit changes
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
           git add aiyouteng.json
-          git diff --cached --quiet || git commit -m "sync parses (safe check)"
-          git push
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-sync TVBox config" && git push)
