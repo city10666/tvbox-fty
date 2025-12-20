@@ -1,4 +1,4 @@
-name: TVBox Parses Evolution V5 (Platform Split)
+name: TVBox Parses Evolution V5 Final
 
 permissions:
   contents: write
@@ -32,32 +32,32 @@ jobs:
           [ -f parses_stats.json ] || echo '{}' > parses_stats.json
           [ -f aiyouteng.last.json ] || echo '{}' > aiyouteng.last.json
 
-      # =====================
-      # 1. 标准母本（不丢结构）
-      # =====================
-      - name: Build base.json
+      # ===============================
+      # 1. Normalize base (array/object safe)
+      # ===============================
+      - name: Normalize base
         run: |
-          jq '
-            .parses = (
-              .parses
-              | map(
-                  if .name == "Json聚合" and .type == 3 and .url == "Demo" then
-                    [
-                      {"name":"并发·主力","type":2,"url":"Parallel"},
-                      {"name":"轮询·兜底","type":2,"url":"Sequence"},
-                      {"name":"聚合·保底","type":3,"url":"Demo"}
-                    ]
-                  else .
-                  end
-                )
-              | flatten
-            )
-            | .spider = "https://raw.githubusercontent.com/qist/tvbox/master/jar/fan.txt;md5;3962e9dbce2c7b61a53b1b796f098d47"
-          ' upstream.json > base.json
+          jq 'if type=="array" then {parses: ., spider:"https://raw.githubusercontent.com/qist/tvbox/master/jar/fan.txt;md5;3962e9dbce2c7b61a53b1b796f098d47"} else
+              .parses = (
+                .parses
+                | map(
+                    if .name == "Json聚合" and .type == 3 and .url == "Demo" then
+                      [
+                        {"name":"并发·主力","type":2,"url":"Parallel"},
+                        {"name":"轮询·兜底","type":2,"url":"Sequence"},
+                        {"name":"聚合·保底","type":3,"url":"Demo"}
+                      ]
+                    else .
+                    end
+                  )
+                | flatten
+              )
+              | .spider = "https://raw.githubusercontent.com/qist/tvbox/master/jar/fan.txt;md5;3962e9dbce2c7b61a53b1b796f098d47"
+            end' upstream.json > base.json
 
-      # =====================
-      # 2. 生成各平台 parses
-      # =====================
+      # ===============================
+      # 2. Platform split + cooldown + success memory
+      # ===============================
       - name: Generate platform JSONs
         run: |
           for p in iqiyi qq youku mgtv other; do
@@ -95,20 +95,20 @@ jobs:
             fi
           done
 
-      # =====================
-      # 3. 主入口（通用）
-      # =====================
-      - name: Build main aiyouteng.json
+      # ===============================
+      # 3. Build main aiyouteng.json
+      # ===============================
+      - name: Build main JSON
         run: |
           cp base.json aiyouteng.json
 
-      # =====================
-      # 4. 提交
-      # =====================
-      - name: Commit
+      # ===============================
+      # 4. Commit
+      # ===============================
+      - name: Commit changes
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add aiyouteng.json platform/*.json parses_stats.json
-          git diff --cached --quiet || git commit -m "V5 platform split json"
+          git diff --cached --quiet || git commit -m "V5 Final platform split JSON"
           git push
