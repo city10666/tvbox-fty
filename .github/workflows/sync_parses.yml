@@ -1,4 +1,4 @@
-name: TVBox Parses Evolution V3 (Platform Aware)
+name: TVBox Parses Evolution V4 (Fail-Safe)
 
 permissions:
   contents: write
@@ -9,11 +9,11 @@ on:
   workflow_dispatch:
 
 jobs:
-  sync:
+  evolve:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install tools
@@ -26,11 +26,15 @@ jobs:
           curl -L -o upstream.json \
           https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json
 
-      - name: Init stats (platform aware)
+      - name: Init learning state
         run: |
           [ -f parses_stats.json ] || echo '{}' > parses_stats.json
+          [ -f aiyouteng.last.json ] || echo '{}' > aiyouteng.last.json
 
-      - name: Normalize parses + spider (NO STRUCT LOSS)
+      # ===============================
+      # 1. 标准化（只动 parses / spider）
+      # ===============================
+      - name: Normalize base
         run: |
           jq '
             .parses = (
@@ -42,8 +46,7 @@ jobs:
                       {"name":"轮询·兜底","type":2,"url":"Sequence"},
                       {"name":"聚合·保底","type":3,"url":"Demo"}
                     ]
-                  else
-                    .
+                  else .
                   end
                 )
               | flatten
@@ -51,25 +54,27 @@ jobs:
             | .spider = "https://raw.githubusercontent.com/qist/tvbox/master/jar/fan.txt;md5;3962e9dbce2c7b61a53b1b796f098d47"
           ' upstream.json > base.json
 
-      - name: Platform learning + auto sort
+      # ===============================
+      # 2. 学习 + 冷却机制
+      # ===============================
+      - name: Learn parses (cooldown aware)
         run: |
-          MAX_PARALLEL=6
+          hour=$(date +%H)
+          peak=0
+          [[ $hour -ge 19 || $hour -le 1 ]] && peak=1
 
           jq -c '.parses[]' base.json | while read -r item; do
             url=$(echo "$item" | jq -r '.url')
-
-            [[ "$url" == "Parallel" || "$url" == "Sequence" || "$url" == "Demo" ]] && continue
+            [[ "$url" =~ Parallel|Sequence|Demo ]] && continue
 
             key=$(echo -n "$url" | md5sum | cut -d' ' -f1)
+            state=$(jq -r ".\"$key\".cooldown // 0" parses_stats.json)
 
-            platform="other"
-            [[ "$url" =~ iqiyi ]] && platform="iqiyi"
-            [[ "$url" =~ qq ]] && platform="qq"
-            [[ "$url" =~ youku ]] && platform="youku"
-            [[ "$url" =~ mgtv ]] && platform="mgtv"
-
-            ok=$(jq -r ".\"$key\".$platform.ok // 0" parses_stats.json)
-            total=$(jq -r ".\"$key\".$platform.total // 0" parses_stats.json)
+            # 冷却中：不测
+            if [[ $state -gt 0 ]]; then
+              jq ".\"$key\".cooldown = ($state - 1)" parses_stats.json > t && mv t parses_stats.json
+              continue
+            fi
 
             if curl -k -L -A "Mozilla/5.0" \
                 --range 0-0 \
@@ -81,27 +86,57 @@ jobs:
               hit=0
             fi
 
-            jq ".\"$key\".$platform.ok = ($ok + $hit)
-                | .\"$key\".$platform.total = ($total + 1)" \
-              parses_stats.json > tmp && mv tmp parses_stats.json
+            fail=$(jq -r ".\"$key\".fail // 0" parses_stats.json)
+
+            if [[ $hit -eq 0 ]]; then
+              fail=$((fail+1))
+            else
+              fail=0
+            fi
+
+            # 连续 3 次失败 → 冷却 3 轮
+            cooldown=0
+            [[ $fail -ge 3 ]] && cooldown=3
+
+            jq "
+              .\"$key\".fail = $fail |
+              .\"$key\".cooldown = $cooldown
+            " parses_stats.json > t && mv t parses_stats.json
           done
 
-      - name: Final reorder (safe)
+      # ===============================
+      # 3. 构建 parses（失败兜底）
+      # ===============================
+      - name: Build final parses
         run: |
           jq '
             .parses |= (
               sort_by(
-                if .url=="Parallel" or .url=="Sequence" or .url=="Demo" then 9999
-                else (.url | length)
+                if .url=="Parallel" then 0
+                elif .url=="Sequence" then 1
+                elif .url=="Demo" then 2
+                else 3
                 end
               )
             )
-          ' base.json > aiyouteng.json
+          ' base.json > aiyouteng.new.json
 
+          count=$(jq '.parses | length' aiyouteng.new.json)
+          if [[ $count -lt 5 ]]; then
+            echo "❌ parses too small, rollback"
+            cp aiyouteng.last.json aiyouteng.json
+          else
+            cp aiyouteng.new.json aiyouteng.json
+            cp aiyouteng.json aiyouteng.last.json
+          fi
+
+      # ===============================
+      # 4. 提交（安全）
+      # ===============================
       - name: Commit
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git add aiyouteng.json parses_stats.json
-          git diff --cached --quiet || git commit -m "platform-aware parse evolution v3"
+          git add aiyouteng.json parses_stats.json aiyouteng.last.json
+          git diff --cached --quiet || git commit -m "parses evolution v4 (failsafe)"
           git push
