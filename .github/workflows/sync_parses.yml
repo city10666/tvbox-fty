@@ -1,4 +1,4 @@
-name: TVBox Parses Evolution V4 (Fail-Safe)
+name: TVBox Parses Evolution V5 (Platform Split)
 
 permissions:
   contents: write
@@ -21,20 +21,21 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y jq curl
 
-      - name: Fetch upstream dianshi.json
+      - name: Fetch upstream
         run: |
           curl -L -o upstream.json \
           https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json
 
-      - name: Init learning state
+      - name: Init state
         run: |
+          mkdir -p platform
           [ -f parses_stats.json ] || echo '{}' > parses_stats.json
           [ -f aiyouteng.last.json ] || echo '{}' > aiyouteng.last.json
 
-      # ===============================
-      # 1. 标准化（只动 parses / spider）
-      # ===============================
-      - name: Normalize base
+      # =====================
+      # 1. 标准母本（不丢结构）
+      # =====================
+      - name: Build base.json
         run: |
           jq '
             .parses = (
@@ -54,89 +55,60 @@ jobs:
             | .spider = "https://raw.githubusercontent.com/qist/tvbox/master/jar/fan.txt;md5;3962e9dbce2c7b61a53b1b796f098d47"
           ' upstream.json > base.json
 
-      # ===============================
-      # 2. 学习 + 冷却机制
-      # ===============================
-      - name: Learn parses (cooldown aware)
+      # =====================
+      # 2. 生成各平台 parses
+      # =====================
+      - name: Generate platform JSONs
         run: |
-          hour=$(date +%H)
-          peak=0
-          [[ $hour -ge 19 || $hour -le 1 ]] && peak=1
+          for p in iqiyi qq youku mgtv other; do
+            jq --arg p "$p" '
+              .parses |= (
+                [
+                  {"name":"并发·主力","type":2,"url":"Parallel"},
+                  {"name":"轮询·兜底","type":2,"url":"Sequence"},
+                  {"name":"聚合·保底","type":3,"url":"Demo"}
+                ]
+                +
+                (
+                  .parses
+                  | map(select(
+                      .url!="Parallel" and .url!="Sequence" and .url!="Demo"
+                    ))
+                  | map(
+                      if $p=="iqiyi" then select(.url|test("iqiyi"))
+                      elif $p=="qq" then select(.url|test("qq|weiyun"))
+                      elif $p=="youku" then select(.url|test("youku"))
+                      elif $p=="mgtv" then select(.url|test("mgtv"))
+                      else .
+                      end
+                    )
+                )
+              )
+            ' base.json > platform/$p.new.json
 
-          jq -c '.parses[]' base.json | while read -r item; do
-            url=$(echo "$item" | jq -r '.url')
-            [[ "$url" =~ Parallel|Sequence|Demo ]] && continue
-
-            key=$(echo -n "$url" | md5sum | cut -d' ' -f1)
-            state=$(jq -r ".\"$key\".cooldown // 0" parses_stats.json)
-
-            # 冷却中：不测
-            if [[ $state -gt 0 ]]; then
-              jq ".\"$key\".cooldown = ($state - 1)" parses_stats.json > t && mv t parses_stats.json
-              continue
-            fi
-
-            if curl -k -L -A "Mozilla/5.0" \
-                --range 0-0 \
-                --connect-timeout 4 \
-                --max-time 6 \
-                -s "$url" >/dev/null; then
-              hit=1
+            count=$(jq '.parses | length' platform/$p.new.json)
+            if [[ $count -ge 5 ]]; then
+              mv platform/$p.new.json platform/$p.json
             else
-              hit=0
+              echo "⚠️ $p parses too small, skipped"
+              rm -f platform/$p.new.json
             fi
-
-            fail=$(jq -r ".\"$key\".fail // 0" parses_stats.json)
-
-            if [[ $hit -eq 0 ]]; then
-              fail=$((fail+1))
-            else
-              fail=0
-            fi
-
-            # 连续 3 次失败 → 冷却 3 轮
-            cooldown=0
-            [[ $fail -ge 3 ]] && cooldown=3
-
-            jq "
-              .\"$key\".fail = $fail |
-              .\"$key\".cooldown = $cooldown
-            " parses_stats.json > t && mv t parses_stats.json
           done
 
-      # ===============================
-      # 3. 构建 parses（失败兜底）
-      # ===============================
-      - name: Build final parses
+      # =====================
+      # 3. 主入口（通用）
+      # =====================
+      - name: Build main aiyouteng.json
         run: |
-          jq '
-            .parses |= (
-              sort_by(
-                if .url=="Parallel" then 0
-                elif .url=="Sequence" then 1
-                elif .url=="Demo" then 2
-                else 3
-                end
-              )
-            )
-          ' base.json > aiyouteng.new.json
+          cp base.json aiyouteng.json
 
-          count=$(jq '.parses | length' aiyouteng.new.json)
-          if [[ $count -lt 5 ]]; then
-            echo "❌ parses too small, rollback"
-            cp aiyouteng.last.json aiyouteng.json
-          else
-            cp aiyouteng.new.json aiyouteng.json
-            cp aiyouteng.json aiyouteng.last.json
-          fi
-
-      # ===============================
-      # 4. 提交（安全）
-      # ===============================
+      # =====================
+      # 4. 提交
+      # =====================
       - name: Commit
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git add aiyouteng.json parses_stats.json aiyouteng.last.json
-          git diff --cached --quiet || git commit -m "parses evolution v4 (failsafe)"
+          git add aiyouteng.json platform/*.json parses_stats.json
+          git diff --cached --quiet || git commit -m "V5 platform split json"
           git push
