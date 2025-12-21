@@ -26,8 +26,8 @@
       "ok": 0,
       "total": 1
     },
-    "fail": 3,
-    "cooldown": 0
+    "fail": 4,
+    "cooldown": 3
   },
   "020b22f268ed29e6acd4e66c54eb014c": {
     "ok": 0,
@@ -36,8 +36,8 @@
       "ok": 0,
       "total": 1
     },
-    "fail": 3,
-    "cooldown": 0
+    "fail": 4,
+    "cooldown": 3
   },
   "a4c8519a2d471dbd8215aa9edb56890f": {
     "ok": 2,
@@ -56,7 +56,7 @@
       "ok": 1,
       "total": 1
     },
-    "fail": 3,
+    "fail": 0,
     "cooldown": 0
   },
   "d8228e282e4a93d0a82ef69b6b81bcf0": {
@@ -96,8 +96,8 @@
       "ok": 0,
       "total": 1
     },
-    "fail": 3,
-    "cooldown": 0
+    "fail": 4,
+    "cooldown": 3
   },
   "0214ae6fcb66a7734a5d34d9d000af43": {
     "ok": 4,
@@ -126,8 +126,8 @@
       "ok": 0,
       "total": 1
     },
-    "fail": 3,
-    "cooldown": 0
+    "fail": 4,
+    "cooldown": 3
   },
   "7d6fd099d5d6febde96dc4e41886b862": {
     "ok": 2,
@@ -226,7 +226,7 @@
       "ok": 1,
       "total": 1
     },
-    "fail": 3,
+    "fail": 0,
     "cooldown": 0
   }
 }
