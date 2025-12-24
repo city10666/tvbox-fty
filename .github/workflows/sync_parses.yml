@@ -1,162 +1,177 @@
-#!/usr/bin/env python3
-"""
-测试合并和转换逻辑
-模拟GitHub Actions中的处理流程
-"""
-import json
-import os
-import tempfile
-from urllib.parse import urljoin
+name: Update dianshi.json from upstream
 
-BASE_RAW_URL = "https://raw.githubusercontent.com/qist/tvbox/master/"
+on:
+  schedule:
+    # 每天 UTC 时间 0 点运行（北京时间 8 点）
+    - cron: '0 0 * * *'
+  workflow_dispatch:  # 允许手动触发
 
-def is_url(s: str) -> bool:
-    return s.startswith(('http://', 'https://', 'ftp://', '//'))
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 需要写入仓库内容
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-def convert_path(path: str) -> str:
-    """转换相对路径为完整URL"""
-    if is_url(path):
-        return path
-    if path.startswith('./'):
-        path = path[2:]
-    if ';' in path:
-        parts = path.split(';')
-        converted = urljoin(BASE_RAW_URL, parts[0])
-        return ';'.join([converted] + parts[1:])
-    else:
-        return urljoin(BASE_RAW_URL, path)
+      - name: Download base template and upstream dianshi.json
+        run: |
+          # 下载用户提供的基础模板（这里使用当前仓库中的tvbox-master/dianshi.json作为基础）
+          # 注意：在GitHub Actions中，我们需要从当前仓库获取基础模板
+          # 但由于这是自更新工作流，我们可以直接使用当前仓库中的文件
+          cp tvbox-master/dianshi.json base_template.json
+          
+          # 下载上游最新的dianshi.json
+          curl -L -o upstream_dianshi.json https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json
 
-def transform_paths(obj, parent_key=None):
-    """递归转换对象中的路径"""
-    if isinstance(obj, dict):
-        for key, val in obj.items():
-            # 跳过 ua 和 User-Agent 字段
-            if key in ['ua', 'User-Agent']:
-                continue
-            obj[key] = transform_paths(val, key)
-        return obj
-    elif isinstance(obj, list):
-        return [transform_paths(item, parent_key) for item in obj]
-    elif isinstance(obj, str):
-        # 只转换以 './' 开头的字符串
-        if obj.startswith('./'):
-            return convert_path(obj)
-        return obj
-    else:
-        return obj
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-def reorder_sites(sites):
-    """重新排序 sites 数组"""
-    if not sites or not isinstance(sites, list):
-        return sites
-    
-    # 定义所需的顺序（用户指定的6个站点）
-    order_keys = [
-        "drpy_js_优酷",
-        "drpy_js_腾云驾雾",
-        "drpy_js_百忙无果",
-        "drpy_js_菜狗",
-        "drpy_js_360影视",
-        "drpy_js_奇珍异兽"
-    ]
-    
-    # 创建字典以便快速查找
-    site_by_key = {site.get('key'): site for site in sites if 'key' in site}
-    
-    # 按顺序构建新列表
-    new_sites = []
-    for key in order_keys:
-        if key in site_by_key:
-            new_sites.append(site_by_key[key])
-            del site_by_key[key]
-    
-    # 剩余的站点按原始顺序追加（保持它们在原始列表中出现的顺序）
-    remaining = [site for site in sites if site.get('key') in site_by_key]
-    new_sites.extend(remaining)
-    
-    return new_sites
+      - name: Merge and convert dianshi.json
+        run: |
+          cat > merge_and_convert.py << 'EOF'
+          #!/usr/bin/env python3
+          """
+          合并基础模板和上游dianshi.json：
+          1. 使用基础模板作为基础（保留parses、rules、ads等配置）
+          2. 从上游获取最新的sites列表
+          3. 按照指定顺序排序6个关键站点
+          4. 转换相对路径为完整URL
+          """
+          import json
+          import sys
+          from urllib.parse import urljoin
 
-def test_merge_and_convert():
-    """测试合并和转换功能"""
-    print("测试合并和转换逻辑...")
-    
-    # 读取当前的基础模板（tvbox-master/dianshi.json）
-    base_file = "tvbox-master/dianshi.json"
-    if not os.path.exists(base_file):
-        print(f"错误：基础模板文件不存在: {base_file}")
-        return
-    
-    with open(base_file, 'r', encoding='utf-8') as f:
-        base_data = json.load(f)
-    
-    print(f"基础模板读取成功，包含 {len(base_data.get('sites', []))} 个站点")
-    print(f"基础模板包含 parses: {len(base_data.get('parses', []))}")
-    print(f"基础模板包含 rules: {len(base_data.get('rules', []))}")
-    print(f"基础模板包含 ads: {len(base_data.get('ads', []))}")
-    
-    # 创建一个模拟的上游数据（包含一些测试站点）
-    upstream_data = {
-        "sites": [
-            {"key": "drpy_js_优酷", "name": "官源 | 优酷[js]", "type": 3, "api": "./lib/drpy2.min.js", "ext": "./js/优酷.js"},
-            {"key": "drpy_js_腾云驾雾", "name": "官源 | 腾讯[js]", "type": 3, "api": "./lib/drpy2.min.js", "ext": "./js/腾云驾雾.js"},
-            {"key": "drpy_js_百忙无果", "name": "官源 | 芒果[js]", "type": 3, "api": "./lib/drpy2.min.js", "ext": "./js/百忙无果.js"},
-            {"key": "drpy_js_菜狗", "name": "官源 | 搜狗[js]", "type": 3, "api": "./lib/drpy2.min.js", "ext": "./js/菜狗.js"},
-            {"key": "drpy_js_360影视", "name": "官源 | 360[js]", "type": 3, "api": "./lib/drpy2.min.js", "ext": "./js/360影视.js"},
-            {"key": "drpy_js_奇珍异兽", "name": "官源 | 爱奇艺[js]", "type": 3, "api": "./lib/drpy2.min.js", "ext": "./js/奇珍异兽.js"},
-            {"key": "test_site_1", "name": "测试站点1", "type": 3, "api": "./lib/test.js", "ext": "./js/test.js"},
-            {"key": "test_site_2", "name": "测试站点2", "type": 3, "api": "./lib/test2.js", "ext": "./js/test2.js"}
-        ]
-    }
-    
-    print(f"\n上游数据包含 {len(upstream_data['sites'])} 个站点")
-    
-    # 从上游获取最新的sites列表
-    if 'sites' in upstream_data and isinstance(upstream_data['sites'], list):
-        upstream_sites = upstream_data['sites']
-    else:
-        upstream_sites = base_data.get('sites', [])
-    
-    # 重新排序sites
-    ordered_sites = reorder_sites(upstream_sites)
-    
-    print(f"\n重新排序后的站点顺序:")
-    for i, site in enumerate(ordered_sites[:10], 1):  # 只显示前10个
-        print(f"  {i}. {site.get('key')} - {site.get('name')}")
-    
-    # 转换sites中的相对路径
-    transformed_sites = transform_paths(ordered_sites)
-    
-    # 更新基础模板中的sites
-    base_data['sites'] = transformed_sites
-    
-    # 检查转换结果
-    print(f"\n路径转换检查:")
-    for site in transformed_sites[:3]:  # 检查前3个站点
-        if 'api' in site:
-            print(f"  {site.get('key')}: api={site['api']}")
-        if 'ext' in site and isinstance(site['ext'], str):
-            print(f"  {site.get('key')}: ext={site['ext']}")
-    
-    # 验证基础模板的其他部分是否保持不变
-    print(f"\n验证基础模板其他部分:")
-    print(f"  parses 数量: {len(base_data.get('parses', []))} (应该保持不变)")
-    print(f"  rules 数量: {len(base_data.get('rules', []))} (应该保持不变)")
-    print(f"  ads 数量: {len(base_data.get('ads', []))} (应该保持不变)")
-    print(f"  doh 数量: {len(base_data.get('doh', []))} (应该保持不变)")
-    
-    # 保存测试结果
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-        json.dump(base_data, f, ensure_ascii=False, indent=2)
-        temp_file = f.name
-    
-    print(f"\n测试完成！结果已保存到: {temp_file}")
-    print("\n总结:")
-    print("1. 基础模板的parses、rules、ads等配置保持不变")
-    print("2. 从上游获取最新的sites列表")
-    print("3. 6个关键站点按指定顺序排序")
-    print("4. 相对路径已转换为完整URL")
-    
-    return temp_file
+          BASE_RAW_URL = "https://raw.githubusercontent.com/qist/tvbox/master/"
 
-if __name__ == '__main__':
-    test_merge_and_convert()
+          def is_url(s: str) -> bool:
+              return s.startswith(('http://', 'https://', 'ftp://', '//'))
+
+          def convert_path(path: str) -> str:
+              """转换相对路径为完整URL"""
+              if is_url(path):
+                  return path
+              if path.startswith('./'):
+                  path = path[2:]
+              if ';' in path:
+                  parts = path.split(';')
+                  converted = urljoin(BASE_RAW_URL, parts[0])
+                  return ';'.join([converted] + parts[1:])
+              else:
+                  return urljoin(BASE_RAW_URL, path)
+
+          def transform_paths(obj, parent_key=None):
+              """递归转换对象中的路径"""
+              if isinstance(obj, dict):
+                  for key, val in obj.items():
+                      # 跳过 ua 和 User-Agent 字段
+                      if key in ['ua', 'User-Agent']:
+                          continue
+                      obj[key] = transform_paths(val, key)
+                  return obj
+              elif isinstance(obj, list):
+                  return [transform_paths(item, parent_key) for item in obj]
+              elif isinstance(obj, str):
+                  # 只转换以 './' 开头的字符串
+                  if obj.startswith('./'):
+                      return convert_path(obj)
+                  return obj
+              else:
+                  return obj
+
+          def reorder_sites(sites):
+              """重新排序 sites 数组"""
+              if not sites or not isinstance(sites, list):
+                  return sites
+              
+              # 定义所需的顺序（用户指定的6个站点）
+              order_keys = [
+                  "drpy_js_优酷",
+                  "drpy_js_腾云驾雾",
+                  "drpy_js_百忙无果",
+                  "drpy_js_菜狗",
+                  "drpy_js_360影视",
+                  "drpy_js_奇珍异兽"
+              ]
+              
+              # 创建字典以便快速查找
+              site_by_key = {site.get('key'): site for site in sites if 'key' in site}
+              
+              # 按顺序构建新列表
+              new_sites = []
+              for key in order_keys:
+                  if key in site_by_key:
+                      new_sites.append(site_by_key[key])
+                      del site_by_key[key]
+              
+              # 剩余的站点按原始顺序追加（保持它们在原始列表中出现的顺序）
+              remaining = [site for site in sites if site.get('key') in site_by_key]
+              new_sites.extend(remaining)
+              
+              return new_sites
+
+          def main():
+              if len(sys.argv) != 4:
+                  print("用法: python merge_and_convert.py <基础模板文件> <上游文件> <输出文件>")
+                  sys.exit(1)
+              
+              base_file = sys.argv[1]
+              upstream_file = sys.argv[2]
+              output_file = sys.argv[3]
+              
+              # 读取基础模板
+              with open(base_file, 'r', encoding='utf-8') as f:
+                  base_data = json.load(f)
+              
+              # 读取上游数据
+              with open(upstream_file, 'r', encoding='utf-8') as f:
+                  upstream_data = json.load(f)
+              
+              # 从上游获取最新的sites列表
+              if 'sites' in upstream_data and isinstance(upstream_data['sites'], list):
+                  upstream_sites = upstream_data['sites']
+              else:
+                  # 如果上游没有sites，使用基础模板的sites
+                  upstream_sites = base_data.get('sites', [])
+              
+              # 重新排序sites
+              ordered_sites = reorder_sites(upstream_sites)
+              
+              # 转换sites中的相对路径
+              transformed_sites = transform_paths(ordered_sites)
+              
+              # 更新基础模板中的sites
+              base_data['sites'] = transformed_sites
+              
+              # 确保其他重要字段也存在（如果上游有更新的话）
+              # 这里我们主要关心sites，其他字段保持基础模板不变
+              
+              # 写入输出文件
+              with open(output_file, 'w', encoding='utf-8', newline='\n') as f:
+                  json.dump(base_data, f, ensure_ascii=False, indent=2)
+              
+              print(f"合并完成，输出到 {output_file}")
+              print(f"处理了 {len(transformed_sites)} 个站点")
+
+          if __name__ == '__main__':
+              main()
+          EOF
+
+          python merge_and_convert.py base_template.json upstream_dianshi.json dianshi.json
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add dianshi.json
+          if git diff --cached --quiet; then
+            echo "没有更改，跳过提交"
+          else
+            git commit -m "自动更新 dianshi.json [$(date +'%Y-%m-%d %H:%M:%S')]"
+            git push origin main
+          fi
