@@ -1,4 +1,4 @@
-name: Sync from upstream
+name: Update dianshi.json
 
 on:
   schedule:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:  # 允许手动触发
 
 jobs:
-  sync:
+  update:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout target repository
@@ -17,57 +17,36 @@ jobs:
           repository: city10666/tvbox-fty
           path: target
 
-      - name: Checkout source repository
-        uses: actions/checkout@v4
-        with:
-          repository: qist/tvbox
-          path: source
+      - name: Download dianshi.json from source
+        run: |
+          curl -L -o source_dianshi.json https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
+      - name: Create conversion script
         run: |
-          pip install --upgrade pip
-
-      - name: Create sync script
-        run: |
-          cat > sync_and_convert.py << 'EOF'
+          cat > convert.py << 'EOF'
           #!/usr/bin/env python3
           """
-          同步源仓库文件到目标仓库，并转换 dianshi.json 中的 URL。
+          转换 dianshi.json 中的相对路径为完整 URL（指向原始仓库）。
           """
           import json
-          import os
-          import shutil
-          import sys
           import re
-          from pathlib import Path
+          import sys
+          from urllib.parse import urljoin
 
-          # 配置
-          SOURCE_REPO = "qist/tvbox"
-          TARGET_REPO = "city10666/tvbox-fty"
-          SOURCE_BRANCH = "master"
-          TARGET_BRANCH = "master"
-
-          # 源仓库 raw URL 基础
-          SOURCE_RAW_BASE = f"https://raw.githubusercontent.com/{SOURCE_REPO}/{SOURCE_BRANCH}/"
-          TARGET_RAW_BASE = f"https://raw.githubusercontent.com/{TARGET_REPO}/{TARGET_BRANCH}/"
+          BASE_RAW_URL = "https://raw.githubusercontent.com/qist/tvbox/master/"
 
           def is_url(s: str) -> bool:
-              """判断字符串是否为 URL"""
               return s.startswith(('http://', 'https://', 'ftp://', '//'))
 
           def looks_like_file_path(s: str) -> bool:
-              """判断字符串是否像文件路径"""
-              # 排除明显不是路径的字符串
               if re.match(r'^[a-zA-Z0-9_]+$', s):
                   return False
-              # 包含斜杠且不以协议开头
               if '/' in s and not is_url(s):
-                  # 排除一些常见的关键字
                   if s.startswith('csp_'):
                       return False
                   if s.startswith('okhttp/'):
@@ -76,121 +55,78 @@ jobs:
                       return False
                   if s.startswith('Mozilla/'):
                       return False
-                  # 如果包含常见的文件扩展名，则很可能是路径
                   if re.search(r'\.(js|jar|txt|json|md5|png|jpg|ico)$', s):
                       return True
-                  # 如果以斜杠开头或包含目录分隔符，则可能是路径
                   if s.startswith('./') or '/' in s:
                       return True
               return False
 
-          def convert_path(path: str, from_base: str, to_base: str) -> str:
-              """将相对路径从一个基础 URL 转换到另一个"""
+          def convert_path(path: str) -> str:
               if is_url(path):
-                  # 如果已经是 URL，检查是否匹配 from_base，如果是则替换
-                  if path.startswith(from_base):
-                      return path.replace(from_base, to_base, 1)
-                  return path  # 不匹配，保持原样
-              # 去除开头的 "./"
+                  return path
               if path.startswith('./'):
                   path = path[2:]
-              # 如果路径包含分号（如 jar 文件后的 md5），只转换分号前的部分
               if ';' in path:
                   parts = path.split(';')
-                  # 构建完整 URL
-                  converted = to_base + parts[0]
+                  converted = urljoin(BASE_RAW_URL, parts[0])
                   return ';'.join([converted] + parts[1:])
               else:
-                  return to_base + path
+                  return urljoin(BASE_RAW_URL, path)
 
-          def convert_string(value: str, from_base: str, to_base: str) -> str:
-              """转换字符串中的路径"""
+          def convert_string(value: str) -> str:
               if looks_like_file_path(value):
-                  return convert_path(value, from_base, to_base)
+                  return convert_path(value)
               return value
 
-          def transform_json(obj, from_base: str, to_base: str):
-              """递归转换 JSON 对象中的所有字符串"""
+          def transform_json(obj):
               if isinstance(obj, dict):
                   for key, val in obj.items():
-                      # 特殊处理：ua 字段不转换
                       if key == 'ua':
                           continue
-                      # 特殊处理：ext 字段可能是字符串或对象，需要递归处理
-                      obj[key] = transform_json(val, from_base, to_base)
+                      obj[key] = transform_json(val)
                   return obj
               elif isinstance(obj, list):
-                  return [transform_json(item, from_base, to_base) for item in obj]
+                  return [transform_json(item) for item in obj]
               elif isinstance(obj, str):
-                  return convert_string(obj, from_base, to_base)
+                  return convert_string(obj)
               else:
                   return obj
-
-          def sync_files(source_dir: Path, target_dir: Path):
-              """将文件从源目录复制到目标目录，排除 .git 目录"""
-              # 确保目标目录存在
-              target_dir.mkdir(parents=True, exist_ok=True)
-              
-              # 遍历源目录
-              for item in source_dir.rglob('*'):
-                  if item.is_dir():
-                      continue
-                  # 计算相对路径
-                  rel_path = item.relative_to(source_dir)
-                  target_path = target_dir / rel_path
-                  # 确保目标父目录存在
-                  target_path.parent.mkdir(parents=True, exist_ok=True)
-                  # 复制文件
-                  shutil.copy2(item, target_path)
-                  print(f"复制: {rel_path}")
 
           def main():
               if len(sys.argv) != 3:
-                  print("用法: python sync_and_convert.py <源目录> <目标目录>")
+                  print("用法: python convert.py <输入文件> <输出文件>")
                   sys.exit(1)
               
-              source_dir = Path(sys.argv[1])
-              target_dir = Path(sys.argv[2])
+              input_file = sys.argv[1]
+              output_file = sys.argv[2]
               
-              # 1. 同步文件
-              print("同步文件中...")
-              sync_files(source_dir, target_dir)
+              with open(input_file, 'r', encoding='utf-8') as f:
+                  data = json.load(f)
               
-              # 2. 转换 dianshi.json
-              dianshi_path = target_dir / "dianshi.json"
-              if dianshi_path.exists():
-                  print(f"转换 {dianshi_path}...")
-                  with open(dianshi_path, 'r', encoding='utf-8') as f:
-                      data = json.load(f)
-                  
-                  transformed = transform_json(data, SOURCE_RAW_BASE, TARGET_RAW_BASE)
-                  
-                  with open(dianshi_path, 'w', encoding='utf-8', newline='\n') as f:
-                      json.dump(transformed, f, ensure_ascii=False, indent=2)
-                  print("转换完成")
-              else:
-                  print(f"警告: {dianshi_path} 不存在")
+              transformed = transform_json(data)
               
-              print("同步和转换完成")
+              with open(output_file, 'w', encoding='utf-8', newline='\n') as f:
+                  json.dump(transformed, f, ensure_ascii=False, indent=2)
+              
+              print(f"转换完成，输出到 {output_file}")
 
           if __name__ == '__main__':
               main()
           EOF
 
-      - name: Run sync and convert script
+      - name: Convert dianshi.json
         run: |
-          python sync_and_convert.py source target
+          python convert.py source_dianshi.json target/dianshi.json
 
       - name: Commit and push changes
         run: |
           cd target
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add .
-          # 检查是否有更改
+          git add dianshi.json
           if git diff --cached --quiet; then
             echo "没有更改，跳过提交"
           else
-            git commit -m "自动同步上游仓库并转换 dianshi.json [$(date +'%Y-%m-%d %H:%M:%S')]"
+            git commit -m "自动更新 dianshi.json [$(date +'%Y-%m-%d %H:%M:%S')]"
             git push origin master
           fi
