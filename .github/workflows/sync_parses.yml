@@ -73,6 +73,41 @@ jobs:
               else:
                   return obj
 
+          def reorder_sites(data):
+              """重新排序 sites 数组"""
+              if 'sites' not in data:
+                  return data
+              sites = data['sites']
+              if not isinstance(sites, list):
+                  return data
+              
+              # 定义所需的顺序（用户指定的6个站点）
+              order_keys = [
+                  "drpy_js_优酷",
+                  "drpy_js_腾云驾雾",
+                  "drpy_js_百忙无果",
+                  "drpy_js_菜狗",
+                  "drpy_js_360影视",
+                  "drpy_js_奇珍异兽"
+              ]
+              
+              # 创建字典以便快速查找
+              site_by_key = {site.get('key'): site for site in sites if 'key' in site}
+              
+              # 按顺序构建新列表
+              new_sites = []
+              for key in order_keys:
+                  if key in site_by_key:
+                      new_sites.append(site_by_key[key])
+                      del site_by_key[key]
+              
+              # 剩余的站点按原始顺序追加（保持它们在原始列表中出现的顺序）
+              remaining = [site for site in sites if site.get('key') in site_by_key]
+              new_sites.extend(remaining)
+              
+              data['sites'] = new_sites
+              return data
+
           def main():
               if len(sys.argv) != 3:
                   print("用法: python convert_simple.py <输入文件> <输出文件>")
@@ -85,9 +120,10 @@ jobs:
                   data = json.load(f)
               
               transformed = transform_json(data)
+              reordered = reorder_sites(transformed)
               
               with open(output_file, 'w', encoding='utf-8', newline='\n') as f:
-                  json.dump(transformed, f, ensure_ascii=False, indent=2)
+                  json.dump(reordered, f, ensure_ascii=False, indent=2)
               
               print(f"转换完成，输出到 {output_file}")
 
