@@ -20,12 +20,25 @@ jobs:
       - name: Download base template and upstream dianshi.json
         run: |
           # 下载用户提供的基础模板（这里使用当前仓库中的tvbox-master/dianshi.json作为基础）
-          # 注意：在GitHub Actions中，我们需要从当前仓库获取基础模板
-          # 但由于这是自更新工作流，我们可以直接使用当前仓库中的文件
-          cp tvbox-master/dianshi.json base_template.json
+          # 首先检查文件是否存在
+          if [ -f "tvbox-master/dianshi.json" ]; then
+            echo "找到基础模板文件: tvbox-master/dianshi.json"
+            cp tvbox-master/dianshi.json base_template.json
+          else
+            echo "错误: tvbox-master/dianshi.json 文件不存在"
+            echo "当前目录内容:"
+            ls -la
+            echo "tvbox-master目录内容:"
+            ls -la tvbox-master/ || echo "tvbox-master目录不存在"
+            exit 1
+          fi
           
           # 下载上游最新的dianshi.json
+          echo "正在下载上游dianshi.json..."
+          # 尝试从main分支下载（qist/tvbox仓库可能使用main分支）
+          curl -L -o upstream_dianshi.json https://raw.githubusercontent.com/qist/tvbox/main/dianshi.json || \
           curl -L -o upstream_dianshi.json https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json
+          echo "上游文件下载完成"
 
       - name: Set up Python
         uses: actions/setup-python@v5
