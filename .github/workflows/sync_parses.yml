@@ -1,4 +1,4 @@
-name: Update dianshi.json from upstream
+name: Complete Update dianshi.json from upstream
 
 on:
   schedule:
@@ -17,44 +17,26 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download base template and upstream dianshi.json
+      - name: Download dianshi.json from source
         run: |
-          # 下载用户提供的基础模板（这里使用当前仓库中的tvbox-master/dianshi.json作为基础）
-          # 首先检查文件是否存在
-          if [ -f "tvbox-master/dianshi.json" ]; then
-            echo "找到基础模板文件: tvbox-master/dianshi.json"
-            cp tvbox-master/dianshi.json base_template.json
-          else
-            echo "错误: tvbox-master/dianshi.json 文件不存在"
-            echo "当前目录内容:"
-            ls -la
-            echo "tvbox-master目录内容:"
-            ls -la tvbox-master/ || echo "tvbox-master目录不存在"
-            exit 1
-          fi
-          
-          # 下载上游最新的dianshi.json
-          echo "正在下载上游dianshi.json..."
-          # 尝试从main分支下载（qist/tvbox仓库可能使用main分支）
-          curl -L -o upstream_dianshi.json https://raw.githubusercontent.com/qist/tvbox/main/dianshi.json || \
-          curl -L -o upstream_dianshi.json https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json
-          echo "上游文件下载完成"
+          echo "正在从源仓库下载 dianshi.json..."
+          curl -L -o source_dianshi.json https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json
+          echo "下载完成，文件大小: $(wc -c < source_dianshi.json) 字节"
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Merge and convert dianshi.json
+      - name: Convert and reorder dianshi.json
         run: |
-          cat > merge_and_convert.py << 'EOF'
+          cat > convert_and_reorder.py << 'EOF'
           #!/usr/bin/env python3
           """
-          合并基础模板和上游dianshi.json：
-          1. 使用基础模板作为基础（保留parses、rules、ads等配置）
-          2. 从上游获取最新的sites列表
-          3. 按照指定顺序排序6个关键站点
-          4. 转换相对路径为完整URL
+          完整转换和重新排序 dianshi.json：
+          1. 转换相对路径为完整URL
+          2. 重新排序6个关键站点到最前面
+          3. 保持完整的dianshi.json结构
           """
           import json
           import sys
@@ -66,7 +48,6 @@ jobs:
               return s.startswith(('http://', 'https://', 'ftp://', '//'))
 
           def convert_path(path: str) -> str:
-              """转换相对路径为完整URL"""
               if is_url(path):
                   return path
               if path.startswith('./'):
@@ -78,17 +59,16 @@ jobs:
               else:
                   return urljoin(BASE_RAW_URL, path)
 
-          def transform_paths(obj, parent_key=None):
-              """递归转换对象中的路径"""
+          def transform_json(obj, parent_key=None):
               if isinstance(obj, dict):
                   for key, val in obj.items():
                       # 跳过 ua 和 User-Agent 字段
                       if key in ['ua', 'User-Agent']:
                           continue
-                      obj[key] = transform_paths(val, key)
+                      obj[key] = transform_json(val, key)
                   return obj
               elif isinstance(obj, list):
-                  return [transform_paths(item, parent_key) for item in obj]
+                  return [transform_json(item, parent_key) for item in obj]
               elif isinstance(obj, str):
                   # 只转换以 './' 开头的字符串
                   if obj.startswith('./'):
@@ -97,10 +77,13 @@ jobs:
               else:
                   return obj
 
-          def reorder_sites(sites):
+          def reorder_sites(data):
               """重新排序 sites 数组"""
-              if not sites or not isinstance(sites, list):
-                  return sites
+              if 'sites' not in data:
+                  return data
+              sites = data['sites']
+              if not isinstance(sites, list):
+                  return data
               
               # 定义所需的顺序（用户指定的6个站点）
               order_keys = [
@@ -126,56 +109,53 @@ jobs:
               remaining = [site for site in sites if site.get('key') in site_by_key]
               new_sites.extend(remaining)
               
-              return new_sites
+              data['sites'] = new_sites
+              return data
 
           def main():
-              if len(sys.argv) != 4:
-                  print("用法: python merge_and_convert.py <基础模板文件> <上游文件> <输出文件>")
+              if len(sys.argv) != 3:
+                  print("用法: python convert_and_reorder.py <输入文件> <输出文件>")
                   sys.exit(1)
               
-              base_file = sys.argv[1]
-              upstream_file = sys.argv[2]
-              output_file = sys.argv[3]
+              input_file = sys.argv[1]
+              output_file = sys.argv[2]
               
-              # 读取基础模板
-              with open(base_file, 'r', encoding='utf-8') as f:
-                  base_data = json.load(f)
+              with open(input_file, 'r', encoding='utf-8') as f:
+                  data = json.load(f)
               
-              # 读取上游数据
-              with open(upstream_file, 'r', encoding='utf-8') as f:
-                  upstream_data = json.load(f)
-              
-              # 从上游获取最新的sites列表
-              if 'sites' in upstream_data and isinstance(upstream_data['sites'], list):
-                  upstream_sites = upstream_data['sites']
-              else:
-                  # 如果上游没有sites，使用基础模板的sites
-                  upstream_sites = base_data.get('sites', [])
+              # 转换路径
+              transformed = transform_json(data)
               
               # 重新排序sites
-              ordered_sites = reorder_sites(upstream_sites)
-              
-              # 转换sites中的相对路径
-              transformed_sites = transform_paths(ordered_sites)
-              
-              # 更新基础模板中的sites
-              base_data['sites'] = transformed_sites
-              
-              # 确保其他重要字段也存在（如果上游有更新的话）
-              # 这里我们主要关心sites，其他字段保持基础模板不变
+              reordered = reorder_sites(transformed)
               
               # 写入输出文件
               with open(output_file, 'w', encoding='utf-8', newline='\n') as f:
-                  json.dump(base_data, f, ensure_ascii=False, indent=2)
+                  json.dump(reordered, f, ensure_ascii=False, indent=2)
               
-              print(f"合并完成，输出到 {output_file}")
-              print(f"处理了 {len(transformed_sites)} 个站点")
+              print(f"转换和排序完成，输出到 {output_file}")
+              print(f"处理了 {len(reordered.get('sites', []))} 个站点")
+              print(f"保留了 {len(reordered.get('parses', []))} 个解析接口")
+              print(f"保留了 {len(reordered.get('rules', []))} 个规则")
+              print(f"保留了 {len(reordered.get('ads', []))} 个广告过滤")
 
           if __name__ == '__main__':
               main()
           EOF
 
-          python merge_and_convert.py base_template.json upstream_dianshi.json dianshi.json
+          python convert_and_reorder.py source_dianshi.json dianshi.json
+
+      - name: Verify the generated file
+        run: |
+          echo "验证生成的文件..."
+          if [ -f dianshi.json ]; then
+            echo "文件存在，大小: $(wc -c < dianshi.json) 字节"
+            echo "文件前5行:"
+            head -5 dianshi.json
+          else
+            echo "错误: dianshi.json 文件未生成"
+            exit 1
+          fi
 
       - name: Commit and push changes
         run: |
@@ -187,4 +167,5 @@ jobs:
           else
             git commit -m "自动更新 dianshi.json [$(date +'%Y-%m-%d %H:%M:%S')]"
             git push origin main
+            echo "已成功推送到 main 分支"
           fi
