@@ -1,67 +1,110 @@
-#!/usr/bin/env python3
-import json
+name: Update dianshi.json from upstream
 
-def reorder_sites(data):
-    """重新排序 sites 数组"""
-    if 'sites' not in data:
-        return data
-    sites = data['sites']
-    if not isinstance(sites, list):
-        return data
-    
-    # 定义所需的顺序
-    order_keys = [
-        "drpy_js_优酷",
-        "drpy_js_腾云驾雾",
-        "drpy_js_百忙无果",
-        "drpy_js_奇珍异兽",
-        "drpy_js_菜狗"
-    ]
-    
-    # 创建字典以便快速查找
-    site_by_key = {site.get('key'): site for site in sites if 'key' in site}
-    
-    # 按顺序构建新列表
-    new_sites = []
-    for key in order_keys:
-        if key in site_by_key:
-            new_sites.append(site_by_key[key])
-            del site_by_key[key]
-    
-    # 剩余的站点按原始顺序追加（保持它们在原始列表中出现的顺序）
-    remaining = [site for site in sites if site.get('key') in site_by_key]
-    new_sites.extend(remaining)
-    
-    data['sites'] = new_sites
-    return data
+on:
+  schedule:
+    # 每天 UTC 时间 0 点运行（北京时间 8 点）
+    - cron: '0 0 * * *'
+  workflow_dispatch:  # 允许手动触发
 
-# 读取原始文件
-with open('tvbox-master/dianshi.json', 'r', encoding='utf-8') as f:
-    data = json.load(f)
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 需要写入仓库内容
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-print("原始 sites 数量:", len(data['sites']))
-print("前5个键:", [site.get('key') for site in data['sites'][:5]])
-print("后10个键:", [site.get('key') for site in data['sites'][-10:]])
+      - name: Download dianshi.json from source
+        run: |
+          curl -L -o source_dianshi.json https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json
 
-# 重新排序
-reordered = reorder_sites(data)
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-# 检查顺序
-ordered_keys = [site.get('key') for site in reordered['sites']]
-print("\n重新排序后，前10个键:", ordered_keys[:10])
+      - name: Convert dianshi.json
+        run: |
+          cat > convert_simple.py << 'EOF'
+          #!/usr/bin/env python3
+          """
+          简单转换 dianshi.json 中的相对路径为完整 URL（指向原始仓库）。
+          只转换以 './' 开头的路径，并且忽略 ua 和 User-Agent 字段。
+          """
+          import json
+          import sys
+          from urllib.parse import urljoin
 
-# 查找目标键的位置
-for key in ["drpy_js_优酷", "drpy_js_腾云驾雾", "drpy_js_百忙无果", "drpy_js_奇珍异兽", "drpy_js_菜狗"]:
-    try:
-        idx = ordered_keys.index(key)
-        print(f"{key} 在索引 {idx}")
-    except ValueError:
-        print(f"{key} 未找到")
+          BASE_RAW_URL = "https://raw.githubusercontent.com/qist/tvbox/master/"
 
-# 验证顺序
-expected_order = ["drpy_js_优酷", "drpy_js_腾云驾雾", "drpy_js_百忙无果", "drpy_js_奇珍异兽", "drpy_js_菜狗"]
-actual = [key for key in ordered_keys if key in expected_order]
-if actual == expected_order:
-    print("\n✅ 顺序正确")
-else:
-    print(f"\n❌ 顺序错误: {actual}")
+          def is_url(s: str) -> bool:
+              return s.startswith(('http://', 'https://', 'ftp://', '//'))
+
+          def convert_path(path: str) -> str:
+              if is_url(path):
+                  return path
+              if path.startswith('./'):
+                  path = path[2:]
+              if ';' in path:
+                  parts = path.split(';')
+                  converted = urljoin(BASE_RAW_URL, parts[0])
+                  return ';'.join([converted] + parts[1:])
+              else:
+                  return urljoin(BASE_RAW_URL, path)
+
+          def transform_json(obj, parent_key=None):
+              if isinstance(obj, dict):
+                  for key, val in obj.items():
+                      # 跳过 ua 和 User-Agent 字段
+                      if key in ['ua', 'User-Agent']:
+                          continue
+                      obj[key] = transform_json(val, key)
+                  return obj
+              elif isinstance(obj, list):
+                  return [transform_json(item, parent_key) for item in obj]
+              elif isinstance(obj, str):
+                  # 只转换以 './' 开头的字符串
+                  if obj.startswith('./'):
+                      return convert_path(obj)
+                  return obj
+              else:
+                  return obj
+
+          def main():
+              if len(sys.argv) != 3:
+                  print("用法: python convert_simple.py <输入文件> <输出文件>")
+                  sys.exit(1)
+              
+              input_file = sys.argv[1]
+              output_file = sys.argv[2]
+              
+              with open(input_file, 'r', encoding='utf-8') as f:
+                  data = json.load(f)
+              
+              transformed = transform_json(data)
+              
+              with open(output_file, 'w', encoding='utf-8', newline='\n') as f:
+                  json.dump(transformed, f, ensure_ascii=False, indent=2)
+              
+              print(f"转换完成，输出到 {output_file}")
+
+          if __name__ == '__main__':
+              main()
+          EOF
+
+          python convert_simple.py source_dianshi.json dianshi.json
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add dianshi.json
+          if git diff --cached --quiet; then
+            echo "没有更改，跳过提交"
+          else
+            git commit -m "自动更新 dianshi.json [$(date +'%Y-%m-%d %H:%M:%S')]"
+            git push origin main
+          fi
