@@ -1,136 +1,51 @@
-name: Update Dianshi.json Daily
+name: Update dianshi.json
 
 on:
   schedule:
-    # 每天凌晨2点运行（UTC时间）
-    - cron: '0 2 * * *'
-  workflow_dispatch: # 支持手动触发
-  push:
-    paths:
-      - '.github/workflows/update-dianshi.yml'
+    - cron: '0 0 * * *'  # 每天UTC时间0点运行
+  workflow_dispatch:     # 允许手动触发
 
 jobs:
-  update-file:
+  update:
     runs-on: ubuntu-latest
-    
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        fetch-depth: 0
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
+      - name: Fetch original dianshi.json
+        run: |
+          curl -o original.json https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install requests
+      - name: Process dianshi.json
+        run: |
+          # 安装jq工具
+          sudo apt-get install -y jq
 
-    - name: Download and process dianshi.json
-      run: |
-        python - << 'EOF'
-import json
-import requests
-import re
-from datetime import datetime
+          # 处理文件路径
+          jq 'walk(if type == "object" then 
+            if .api? then .api |= (if startswith("./") then "https://github.com/qist/tvbox/blob/master/" + .[2:] else . end) else . end |
+            if .ext? then .ext |= (if startswith("./") then "https://github.com/qist/tvbox/blob/master/" + .[2:] else . end) else . end
+          else . end)' original.json > processed.json
 
-# 源文件URL
-source_url = "https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json"
+          # 提取并排序指定的sites
+          jq '.sites |= (
+            map(select(.key | IN("drpy_js_优酷", "drpy_js_百忙无果", "drpy_js_腾云驾雾", "drpy_js_奇珍异兽", "drpy_js_菜狗", "drpy_js_360影视"))) +
+            map(select(.key | IN("drpy_js_优酷", "drpy_js_百忙无果", "drpy_js_腾云驾雾", "drpy_js_奇珍异兽", "drpy_js_菜狗", "drpy_js_360影视") | not))
+          )' processed.json > final.json
 
-print("正在下载源文件...")
-response = requests.get(source_url)
-if response.status_code != 200:
-    print(f"下载失败: {response.status_code}")
-    exit(1)
+          # 检查文件是否改变
+          if ! cmp -s final.json dianshi.json; then
+            cp final.json dianshi.json
+            echo "CHANGED=true" >> $GITHUB_ENV
+          else
+            echo "CHANGED=false" >> $GITHUB_ENV
+          fi
 
-source_data = response.json()
-print(f"下载成功，JSON结构: {list(source_data.keys())}")
-
-# 处理URL替换
-base_url = "https://raw.githubusercontent.com/qist/tvbox/master/"
-
-def replace_urls(obj):
-    """递归替换URL"""
-    if isinstance(obj, dict):
-        for key, value in obj.items():
-            if isinstance(value, str) and value.startswith("./"):
-                # 替换 ./ 开头的路径
-                obj[key] = base_url + value[2:]
-            elif isinstance(value, (dict, list)):
-                replace_urls(value)
-    elif isinstance(obj, list):
-        for item in obj:
-            replace_urls(item)
-
-# 先处理整个JSON的URL替换
-replace_urls(source_data)
-
-# 定义需要前置的特定项目
-priority_items = [
-    {"key": "drpy_js_优酷", "name": "官源 | 优酷[js]", "type": 3, "api": f"{base_url}lib/drpy2.min.js", "ext": f"{base_url}js/优酷.js"},
-    {"key": "drpy_js_百忙无果", "name": "官源 | 芒果[js]", "type": 3, "api": f"{base_url}lib/drpy2.min.js", "ext": f"{base_url}js/百忙无果.js"},
-    {"key": "drpy_js_腾云驾雾", "name": "官源 | 腾讯[js]", "type": 3, "api": f"{base_url}lib/drpy2.min.js", "ext": f"{base_url}js/腾云驾雾.js"},
-    {"key": "drpy_js_奇珍异兽", "name": "官源 | 爱奇艺[js]", "type": 3, "api": f"{base_url}lib/drpy2.min.js", "ext": f"{base_url}js/奇珍异兽.js"},
-    {"key": "drpy_js_菜狗", "name": "官源 | 搜狗[js]", "type": 3, "api": f"{base_url}lib/drpy2.min.js", "ext": f"{base_url}js/菜狗.js"},
-    {"key": "drpy_js_360影视", "name": "官源 | 360[js]", "type": 3, "api": f"{base_url}lib/drpy2.min.js", "ext": f"{base_url}js/360影视.js"}
-]
-
-# 处理sites数组
-if "sites" in source_data:
-    sites = source_data["sites"]
-    print(f"处理前的sites数量: {len(sites)}")
-    
-    # 过滤掉已经存在的priority items（避免重复）
-    existing_keys = [item["key"] for item in priority_items]
-    other_sites = [site for site in sites if site.get("key") not in existing_keys]
-    
-    # 组合：priority items + 其他sites
-    sorted_sites = priority_items + other_sites
-    
-    source_data["sites"] = sorted_sites
-    print(f"处理后的sites数量: {len(sorted_sites)}")
-    print(f"优先项数量: {len(priority_items)}")
-    print(f"其他项数量: {len(other_sites)}")
-
-# 添加更新时间戳
-source_data["_last_updated"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-source_data["_source"] = source_url
-source_data["_repository"] = "https://github.com/city10666/tvbox-fty"
-
-# 保存到文件
-output_file = "dianshi.json"
-with open(output_file, 'w', encoding='utf-8') as f:
-    json.dump(source_data, f, ensure_ascii=False, indent=2)
-
-print(f"处理完成，已保存到 {output_file}")
-
-# 检查是否有变更
-import subprocess
-result = subprocess.run(['git', 'status', '--porcelain', output_file], capture_output=True, text=True)
-if result.stdout.strip():
-    print("检测到文件变更")
-    exit(0)  # 有变更
-else:
-    print("文件无变更")
-    exit(1)  # 无变更，用于跳过commit步骤
-EOF
-
-    - name: Check if changes exist
-      id: check_changes
-      run: |
-        git status --porcelain dianshi.json | grep -q dianshi.json && echo "changes=true" >> $GITHUB_OUTPUT || echo "changes=false" >> $GITHUB_OUTPUT
-
-    - name: Commit and push if changed
-      if: steps.check_changes.outputs.changes == 'true'
-      run: |
-        git config --global user.name 'GitHub Actions Bot'
-        git config --global user.email 'actions@github.com'
-        git add dianshi.json
-        git commit -m "🔄 自动更新 dianshi.json [$(date +'%Y-%m-%d %H:%M:%S')]"
-        git push origin main
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Commit and push changes
+        if: env.CHANGED == 'true'
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add dianshi.json
+          git commit -m "Auto update dianshi.json"
+          git push
