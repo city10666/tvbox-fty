@@ -21,20 +21,97 @@ jobs:
           # 安装jq工具
           sudo apt-get install -y jq
 
-          # 处理所有以./开头的路径
-          jq 'walk(if type == "object" then 
-            with_entries(
-              if .value? and (.value|type == "string") and (.value|startswith("./")) then
-                .value |= "https://github.com/qist/tvbox/blob/master/" + .[2:]
-              else . end
-            )
+          # 第一步：处理所有以./开头的路径
+          jq 'walk(if type == "object" and has("api") and .api|type == "string" and .api|startswith("./") then 
+            .api = "https://github.com/qist/tvbox/blob/master/" + .api[2:]
+          elif type == "object" and has("ext") and .ext|type == "string" and .ext|startswith("./") then 
+            .ext = "https://github.com/qist/tvbox/blob/master/" + .ext[2:]
+          elif type == "object" and has("jar") and .jar|type == "string" and .jar|startswith("./") then 
+            .jar = "https://github.com/qist/tvbox/blob/master/" + .jar[2:]
+          elif type == "object" and has("playerType") and .playerType|type == "string" and .playerType|startswith("./") then 
+            .playerType = "https://github.com/qist/tvbox/blob/master/" + .playerType[2:]
+          elif type == "object" and has("searchUrl") and .searchUrl|type == "string" and .searchUrl|startswith("./") then 
+            .searchUrl = "https://github.com/qist/tvbox/blob/master/" + .searchUrl[2:]
           else . end)' original.json > processed.json
 
-          # 提取并排序指定的sites
-          jq '.sites |= (
-            map(select(.key | IN("drpy_js_优酷", "drpy_js_百忙无果", "drpy_js_腾云驾雾", "drpy_js_奇珍异兽", "drpy_js_菜狗", "drpy_js_360影视"))) +
-            map(select(.key | IN("drpy_js_优酷", "drpy_js_百忙无果", "drpy_js_腾云驾雾", "drpy_js_奇珍异兽", "drpy_js_菜狗", "drpy_js_360影视") | not))
-          )' processed.json > final.json
+          # 第二步：严格按要求的顺序排序sites
+          jq '{
+            other: .other,
+            sites: (
+              [.sites[] | select(.key == "drpy_js_优酷")] +
+              [.sites[] | select(.key == "drpy_js_百忙无果")] +
+              [.sites[] | select(.key == "drpy_js_腾云驾雾")] +
+              [.sites[] | select(.key == "drpy_js_奇珍异兽")] +
+              [.sites[] | select(.key == "drpy_js_菜狗")] +
+              [.sites[] | select(.key == "drpy_js_360影视")] +
+              [.sites[] | select(.key | IN("drpy_js_优酷", "drpy_js_百忙无果", "drpy_js_腾云驾雾", "drpy_js_奇珍异兽", "drpy_js_菜狗", "drpy_js_360影视") | not)]
+            ),
+            wallpaper: .wallpaper,
+            logo: .logo,
+            class: .class,
+            beans: .beans,
+            lives: .lives,
+            rules: .rules,
+            ext: .ext,
+            drpyJsDz: .drpyJsDz,
+            drpyJsBd: .drpyJsBd,
+            drpyJsHt: .drpyJsHt,
+            drpyJsJf: .drpyJsJf,
+            drpyJsLz: .drpyJsLz,
+            drpyJsQx: .drpyJsQx,
+            drpyJsYc: .drpyJsYc,
+            drpyJsWp: .drpyJsWp,
+            drpyJsZy: .drpyJsZy,
+            drpyJsJisu: .drpyJsJisu,
+            drpyJsKuaikan: .drpyJsKuaikan,
+            drpyJsMgtv: .drpyJsMgtv,
+            drpyJsLetv: .drpyJsLetv,
+            drpyJsBesTv: .drpyJsBesTv,
+            drpyJsWasu: .drpyJsWasu,
+            drpyJsPptv: .drpyJsPptv,
+            drpyJsFunTv: .drpyJsFunTv,
+            drpyJsFeiyang: .drpyJsFeiyang,
+            drpyJsIptv: .drpyJsIptv,
+            drpyJsToutiao: .drpyJsToutiao,
+            drpyJsWeishi: .drpyJsWeishi,
+            drpyJsDouyin: .drpyJsDouyin,
+            drpyJsHuoshan: .drpyJsHuoshan,
+            drpyJsKuaishou: .drpyJsKuaishou,
+            drpyJsXigua: .drpyJsXigua,
+            drpyJsSougou: .drpyJsSougou,
+            drpyJsBaidu: .drpyJsBaidu,
+            drpyJs360: .drpyJs360,
+            drpyJsGoogle: .drpyJsGoogle,
+            drpyJsBing: .drpyJsBing,
+            drpyJsSogou: .drpyJsSogou,
+            drpyJsYandex: .drpyJsYandex,
+            drpyJsCustom: .drpyJsCustom,
+            drpyJsProxy: .drpyJsProxy,
+            drpyJsMirror: .drpyJsMirror,
+            drpyJsBackup: .drpyJsBackup,
+            drpyJsTest: .drpyJsTest,
+            drpyJsDev: .drpyJsDev,
+            drpyJsBeta: .drpyJsBeta,
+            drpyJsAlpha: .drpyJsAlpha,
+            drpyJsStable: .drpyJsStable,
+            drpyJsLatest: .drpyJsLatest,
+            drpyJsLegacy: .drpyJsLegacy,
+            drpyJsOld: .drpyJsOld,
+            drpyJsNew: .drpyJsNew,
+            drpyJsCurrent: .drpyJsCurrent,
+            drpyJsDefault: .drpyJsDefault,
+            drpyJsFallback: .drpyJsFallback,
+            drpyJsPrimary: .drpyJsPrimary,
+            drpyJsSecondary: .drpyJsSecondary,
+            drpyJsTertiary: .drpyJsTertiary,
+            drpyJsQuaternary: .drpyJsQuaternary,
+            drpyJsQuinary: .drpyJsQuinary,
+            drpyJsSenary: .drpyJsSenary,
+            drpyJsSeptenary: .drpyJsSeptenary,
+            drpyJsOctonary: .drpyJsOctonary,
+            drpyJsNonary: .drpyJsNonary,
+            drpyJsDenary: .drpyJsDenary
+          }' processed.json > final.json
 
           # 检查文件是否改变
           if ! cmp -s final.json dianshi.json; then
