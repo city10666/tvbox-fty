@@ -1,171 +1,136 @@
-name: Complete Update dianshi.json from upstream
+name: Update Dianshi.json Daily
 
 on:
   schedule:
-    # 每天 UTC 时间 0 点运行（北京时间 8 点）
-    - cron: '0 0 * * *'
-  workflow_dispatch:  # 允许手动触发
+    # 每天凌晨2点运行（UTC时间）
+    - cron: '0 2 * * *'
+  workflow_dispatch: # 支持手动触发
+  push:
+    paths:
+      - '.github/workflows/update-dianshi.yml'
 
 jobs:
-  update:
+  update-file:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write  # 需要写入仓库内容
+    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
 
-      - name: Download dianshi.json from source
-        run: |
-          echo "正在从源仓库下载 dianshi.json..."
-          curl -L -o source_dianshi.json https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json
-          echo "下载完成，文件大小: $(wc -c < source_dianshi.json) 字节"
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests
 
-      - name: Convert and reorder dianshi.json
-        run: |
-          cat > convert_and_reorder.py << 'EOF'
-          #!/usr/bin/env python3
-          """
-          完整转换和重新排序 dianshi.json：
-          1. 转换相对路径为完整URL
-          2. 重新排序6个关键站点到最前面
-          3. 保持完整的dianshi.json结构
-          """
-          import json
-          import sys
-          from urllib.parse import urljoin
+    - name: Download and process dianshi.json
+      run: |
+        python - << 'EOF'
+import json
+import requests
+import re
+from datetime import datetime
 
-          BASE_RAW_URL = "https://raw.githubusercontent.com/qist/tvbox/master/"
+# 源文件URL
+source_url = "https://raw.githubusercontent.com/qist/tvbox/master/dianshi.json"
 
-          def is_url(s: str) -> bool:
-              return s.startswith(('http://', 'https://', 'ftp://', '//'))
+print("正在下载源文件...")
+response = requests.get(source_url)
+if response.status_code != 200:
+    print(f"下载失败: {response.status_code}")
+    exit(1)
 
-          def convert_path(path: str) -> str:
-              if is_url(path):
-                  return path
-              if path.startswith('./'):
-                  path = path[2:]
-              if ';' in path:
-                  parts = path.split(';')
-                  converted = urljoin(BASE_RAW_URL, parts[0])
-                  return ';'.join([converted] + parts[1:])
-              else:
-                  return urljoin(BASE_RAW_URL, path)
+source_data = response.json()
+print(f"下载成功，JSON结构: {list(source_data.keys())}")
 
-          def transform_json(obj, parent_key=None):
-              if isinstance(obj, dict):
-                  for key, val in obj.items():
-                      # 跳过 ua 和 User-Agent 字段
-                      if key in ['ua', 'User-Agent']:
-                          continue
-                      obj[key] = transform_json(val, key)
-                  return obj
-              elif isinstance(obj, list):
-                  return [transform_json(item, parent_key) for item in obj]
-              elif isinstance(obj, str):
-                  # 只转换以 './' 开头的字符串
-                  if obj.startswith('./'):
-                      return convert_path(obj)
-                  return obj
-              else:
-                  return obj
+# 处理URL替换
+base_url = "https://raw.githubusercontent.com/qist/tvbox/master/"
 
-          def reorder_sites(data):
-              """重新排序 sites 数组"""
-              if 'sites' not in data:
-                  return data
-              sites = data['sites']
-              if not isinstance(sites, list):
-                  return data
-              
-              # 定义所需的顺序（用户指定的6个站点）
-              order_keys = [
-                  "drpy_js_优酷",
-                  "drpy_js_腾云驾雾",
-                  "drpy_js_百忙无果",
-                  "drpy_js_菜狗",
-                  "drpy_js_360影视",
-                  "drpy_js_奇珍异兽"
-              ]
-              
-              # 创建字典以便快速查找
-              site_by_key = {site.get('key'): site for site in sites if 'key' in site}
-              
-              # 按顺序构建新列表
-              new_sites = []
-              for key in order_keys:
-                  if key in site_by_key:
-                      new_sites.append(site_by_key[key])
-                      del site_by_key[key]
-              
-              # 剩余的站点按原始顺序追加（保持它们在原始列表中出现的顺序）
-              remaining = [site for site in sites if site.get('key') in site_by_key]
-              new_sites.extend(remaining)
-              
-              data['sites'] = new_sites
-              return data
+def replace_urls(obj):
+    """递归替换URL"""
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if isinstance(value, str) and value.startswith("./"):
+                # 替换 ./ 开头的路径
+                obj[key] = base_url + value[2:]
+            elif isinstance(value, (dict, list)):
+                replace_urls(value)
+    elif isinstance(obj, list):
+        for item in obj:
+            replace_urls(item)
 
-          def main():
-              if len(sys.argv) != 3:
-                  print("用法: python convert_and_reorder.py <输入文件> <输出文件>")
-                  sys.exit(1)
-              
-              input_file = sys.argv[1]
-              output_file = sys.argv[2]
-              
-              with open(input_file, 'r', encoding='utf-8') as f:
-                  data = json.load(f)
-              
-              # 转换路径
-              transformed = transform_json(data)
-              
-              # 重新排序sites
-              reordered = reorder_sites(transformed)
-              
-              # 写入输出文件
-              with open(output_file, 'w', encoding='utf-8', newline='\n') as f:
-                  json.dump(reordered, f, ensure_ascii=False, indent=2)
-              
-              print(f"转换和排序完成，输出到 {output_file}")
-              print(f"处理了 {len(reordered.get('sites', []))} 个站点")
-              print(f"保留了 {len(reordered.get('parses', []))} 个解析接口")
-              print(f"保留了 {len(reordered.get('rules', []))} 个规则")
-              print(f"保留了 {len(reordered.get('ads', []))} 个广告过滤")
+# 先处理整个JSON的URL替换
+replace_urls(source_data)
 
-          if __name__ == '__main__':
-              main()
-          EOF
+# 定义需要前置的特定项目
+priority_items = [
+    {"key": "drpy_js_优酷", "name": "官源 | 优酷[js]", "type": 3, "api": f"{base_url}lib/drpy2.min.js", "ext": f"{base_url}js/优酷.js"},
+    {"key": "drpy_js_百忙无果", "name": "官源 | 芒果[js]", "type": 3, "api": f"{base_url}lib/drpy2.min.js", "ext": f"{base_url}js/百忙无果.js"},
+    {"key": "drpy_js_腾云驾雾", "name": "官源 | 腾讯[js]", "type": 3, "api": f"{base_url}lib/drpy2.min.js", "ext": f"{base_url}js/腾云驾雾.js"},
+    {"key": "drpy_js_奇珍异兽", "name": "官源 | 爱奇艺[js]", "type": 3, "api": f"{base_url}lib/drpy2.min.js", "ext": f"{base_url}js/奇珍异兽.js"},
+    {"key": "drpy_js_菜狗", "name": "官源 | 搜狗[js]", "type": 3, "api": f"{base_url}lib/drpy2.min.js", "ext": f"{base_url}js/菜狗.js"},
+    {"key": "drpy_js_360影视", "name": "官源 | 360[js]", "type": 3, "api": f"{base_url}lib/drpy2.min.js", "ext": f"{base_url}js/360影视.js"}
+]
 
-          python convert_and_reorder.py source_dianshi.json dianshi.json
+# 处理sites数组
+if "sites" in source_data:
+    sites = source_data["sites"]
+    print(f"处理前的sites数量: {len(sites)}")
+    
+    # 过滤掉已经存在的priority items（避免重复）
+    existing_keys = [item["key"] for item in priority_items]
+    other_sites = [site for site in sites if site.get("key") not in existing_keys]
+    
+    # 组合：priority items + 其他sites
+    sorted_sites = priority_items + other_sites
+    
+    source_data["sites"] = sorted_sites
+    print(f"处理后的sites数量: {len(sorted_sites)}")
+    print(f"优先项数量: {len(priority_items)}")
+    print(f"其他项数量: {len(other_sites)}")
 
-      - name: Verify the generated file
-        run: |
-          echo "验证生成的文件..."
-          if [ -f dianshi.json ]; then
-            echo "文件存在，大小: $(wc -c < dianshi.json) 字节"
-            echo "文件前5行:"
-            head -5 dianshi.json
-          else
-            echo "错误: dianshi.json 文件未生成"
-            exit 1
-          fi
+# 添加更新时间戳
+source_data["_last_updated"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+source_data["_source"] = source_url
+source_data["_repository"] = "https://github.com/city10666/tvbox-fty"
 
-      - name: Commit and push changes
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add dianshi.json
-          if git diff --cached --quiet; then
-            echo "没有更改，跳过提交"
-          else
-            git commit -m "自动更新 dianshi.json [$(date +'%Y-%m-%d %H:%M:%S')]"
-            git push origin main
-            echo "已成功推送到 main 分支"
-          fi
+# 保存到文件
+output_file = "dianshi.json"
+with open(output_file, 'w', encoding='utf-8') as f:
+    json.dump(source_data, f, ensure_ascii=False, indent=2)
+
+print(f"处理完成，已保存到 {output_file}")
+
+# 检查是否有变更
+import subprocess
+result = subprocess.run(['git', 'status', '--porcelain', output_file], capture_output=True, text=True)
+if result.stdout.strip():
+    print("检测到文件变更")
+    exit(0)  # 有变更
+else:
+    print("文件无变更")
+    exit(1)  # 无变更，用于跳过commit步骤
+EOF
+
+    - name: Check if changes exist
+      id: check_changes
+      run: |
+        git status --porcelain dianshi.json | grep -q dianshi.json && echo "changes=true" >> $GITHUB_OUTPUT || echo "changes=false" >> $GITHUB_OUTPUT
+
+    - name: Commit and push if changed
+      if: steps.check_changes.outputs.changes == 'true'
+      run: |
+        git config --global user.name 'GitHub Actions Bot'
+        git config --global user.email 'actions@github.com'
+        git add dianshi.json
+        git commit -m "🔄 自动更新 dianshi.json [$(date +'%Y-%m-%d %H:%M:%S')]"
+        git push origin main
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
