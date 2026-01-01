@@ -21,10 +21,13 @@ jobs:
           # 安装jq工具
           sudo apt-get install -y jq
 
-          # 处理文件路径 - 增加类型检查
+          # 处理所有以./开头的路径
           jq 'walk(if type == "object" then 
-            if .api? and (.api|type == "string") then .api |= (if startswith("./") then "https://github.com/qist/tvbox/blob/master/" + .[2:] else . end) else . end |
-            if .ext? and (.ext|type == "string") then .ext |= (if startswith("./") then "https://github.com/qist/tvbox/blob/master/" + .[2:] else . end) else . end
+            with_entries(
+              if .value? and (.value|type == "string") and (.value|startswith("./")) then
+                .value |= "https://github.com/qist/tvbox/blob/master/" + .[2:]
+              else . end
+            )
           else . end)' original.json > processed.json
 
           # 提取并排序指定的sites
