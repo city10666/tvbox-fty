@@ -8,7 +8,11 @@
       "searchable": 1,
       "quickSearch": 1,
       "filterable": 0,
-      "ext": "https://tvbox0821.20231818.xyz/js/360影视.js"
+      "ext": "https://tvbox0821.20231818.xyz/js/360影视.js",
+      "categories": [
+        "动漫",
+        "电视剧"
+      ]
     },
     {
       "key": "drpy_js_百忙无果",
@@ -18,7 +22,11 @@
       "searchable": 1,
       "quickSearch": 1,
       "filterable": 0,
-      "ext": "https://tvbox0821.20231818.xyz/js/百忙无果.js"
+      "ext": "https://tvbox0821.20231818.xyz/js/百忙无果.js",
+      "categories": [
+        "少儿",
+        "电视剧"
+      ]
     },
     {
       "key": "drpy_js_腾云驾雾",
@@ -28,7 +36,11 @@
       "searchable": 1,
       "quickSearch": 1,
       "filterable": 0,
-      "ext": "https://tvbox0821.20231818.xyz/js/腾云驾雾.js"
+      "ext": "https://tvbox0821.20231818.xyz/js/腾云驾雾.js",
+      "categories": [
+        "少儿",
+        "电视剧"
+      ]
     },
     {
       "key": "drpy_js_奇珍异兽",
@@ -38,7 +50,11 @@
       "searchable": 1,
       "quickSearch": 1,
       "filterable": 0,
-      "ext": "https://tvbox0821.20231818.xyz/js/奇珍异兽.js"
+      "ext": "https://tvbox0821.20231818.xyz/js/奇珍异兽.js",
+      "categories": [
+        "动漫",
+        "电视剧"
+      ]
     },
     {
       "key": "drpy_js_菜狗",
@@ -48,7 +64,11 @@
       "searchable": 1,
       "quickSearch": 1,
       "filterable": 0,
-      "ext": "https://tvbox0821.20231818.xyz/js/菜狗.js"
+      "ext": "https://tvbox0821.20231818.xyz/js/菜狗.js",
+      "categories": [
+        "动漫",
+        "电视剧"
+      ]
     },
     {
       "key": "drpy_js_优酷",
@@ -58,7 +78,11 @@
       "searchable": 1,
       "quickSearch": 1,
       "filterable": 0,
-      "ext": "https://tvbox0821.20231818.xyz/js/优酷.js"
+      "ext": "https://tvbox0821.20231818.xyz/js/优酷.js",
+      "categories": [
+        "少儿",
+        "电视剧"
+      ]
     }
   ],
   "parses": [
